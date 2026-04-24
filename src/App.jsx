@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 const WEBHOOK_URL         = import.meta.env.VITE_N8N_WEBHOOK_URL         || "";
 const LIBRARY_WEBHOOK_URL = import.meta.env.VITE_N8N_LIBRARY_WEBHOOK_URL || "";
 const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
+const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
+const ILOVEPDF_KEY        = import.meta.env.VITE_ILOVEPDF_KEY            || "";
 
 // ── DATA ───────────────────────────────────────────────────────────────────────
 const DOC_TYPES = [
@@ -14,11 +16,11 @@ const DOC_TYPES = [
   { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration" },
   { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:true,  manual:false, description:"Product test results & lab certificate" },
   { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project" },
-  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter" },
-  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document" },
-  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product" },
-  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences" },
-  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list" },
+  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", autoKeywords:["approval","approved"] },
+  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document",                autoKeywords:["trade license","trade licence"] },
+  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product",            autoKeywords:["msds","safety data","sds"] },
+  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences",        autoKeywords:["iso","certification"] },
+  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list",           autoKeywords:["vendor","vendor list","supplier list"] },
 ];
 
 const PRESETS = {
@@ -129,7 +131,22 @@ export default function SubmittalBuilder() {
     setLibLoading(true);
     fetch(LIBRARY_WEBHOOK_URL)
       .then(r=>r.json())
-      .then(d=>{ if (d.files) setAllFiles(d.files); })
+      .then(d=>{
+        if (d.files) {
+          setAllFiles(d.files);
+          // Auto-match files to doc slots by keyword
+          const autoMatched = {};
+          DOC_TYPES.filter(dt=>dt.manual && dt.autoKeywords).forEach(dt=>{
+            const match = d.files.find(f =>
+              dt.autoKeywords.some(kw => f.name.toLowerCase().includes(kw.toLowerCase()))
+            );
+            if (match) autoMatched[dt.key] = match;
+          });
+          if (Object.keys(autoMatched).length > 0) {
+            setManualFiles(prev=>({ ...autoMatched, ...prev }));
+          }
+        }
+      })
       .catch(e=>setLibError(e.message))
       .finally(()=>setLibLoading(false));
   }, []);
@@ -139,6 +156,36 @@ export default function SubmittalBuilder() {
   const applyPreset = name => { setSelected(new Set(PRESETS[name])); setActivePreset(name); };
   const openLibrary = useCallback(docKey => { setLibraryTarget(docKey); setLibraryOpen(true); }, []);
   const pickFile    = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); }, [libraryTarget]);
+
+  const [merging, setMerging]   = useState(false);
+  const [mergeError, setMergeError] = useState("");
+
+  const handleMerge = async () => {
+    if (!MERGE_URL) { setMergeError("VITE_N8N_MERGE_URL not set"); return; }
+    setMerging(true); setMergeError("");
+    try {
+      const filledDocs = DOC_TYPES
+        .filter(d => d.aiGenerated && selected.has(d.key) && generated[d.key])
+        .map(d => ({ docKey: d.key, viewLink: generated[d.key].viewLink }));
+      const driveFileIds = DOC_TYPES
+        .filter(d => d.manual && selected.has(d.key) && manualFiles[d.key])
+        .map(d => ({ docKey: d.key, fileId: manualFiles[d.key].id }));
+      const outputName = (info.projectName || "Submittal").replace(/[^a-zA-Z0-9_-]/g,"_") + "_Submittal";
+      const res = await fetch(MERGE_URL, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ filledDocs, driveFileIds, outputName, ilovepdfKey: ILOVEPDF_KEY })
+      });
+      if (!res.ok) throw new Error(`Merge failed: ${res.status}`);
+      const data = await res.json();
+      if (!data.success || !data.pdfBase64) throw new Error("No PDF returned");
+      const blob = new Blob([Uint8Array.from(atob(data.pdfBase64), c=>c.charCodeAt(0))], { type:"application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = outputName + ".pdf"; a.click();
+      URL.revokeObjectURL(url);
+    } catch(e) { setMergeError(e.message); }
+    finally { setMerging(false); }
+  };
 
   const step1Valid = info.projectName && info.client && info.productName;
 
@@ -543,9 +590,15 @@ export default function SubmittalBuilder() {
               </div>
             </div>
 
-            <div style={{ marginTop:20, display:"flex", justifyContent:"space-between" }}>
+            <div style={{ marginTop:20, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
               <button onClick={()=>{ setStep(2); setGenerated({}); setActiveDoc(null); }} style={btnG}>← Rebuild</button>
-              <button onClick={exportPDF} style={btnP}>⬇ Export as PDF Package</button>
+              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                {mergeError && <span style={{ fontSize:12, color:"#fca5a5" }}>⚠ {mergeError}</span>}
+                <button onClick={exportPDF} style={btnG}>⬇ Export HTML Preview</button>
+                <button onClick={handleMerge} disabled={merging} style={{ ...btnP, opacity:merging?0.6:1, display:"flex", alignItems:"center", gap:7 }}>
+                  {merging ? "⏳ Merging…" : "📦 Download Merged PDF"}
+                </button>
+              </div>
             </div>
           </div>
         )}
