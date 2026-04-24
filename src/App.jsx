@@ -3,25 +3,28 @@ import { useState, useEffect, useCallback } from "react";
 // ── CONFIG ─────────────────────────────────────────────────────────────────────
 const WEBHOOK_URL         = import.meta.env.VITE_N8N_WEBHOOK_URL         || "";
 const LIBRARY_WEBHOOK_URL = import.meta.env.VITE_N8N_LIBRARY_WEBHOOK_URL || "";
+const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 
 // ── DATA ───────────────────────────────────────────────────────────────────────
 const DOC_TYPES = [
-  { key:"cover",             label:"Cover Page",                 icon:"📄", aiGenerated:false, manual:false, description:"Submittal cover with project details" },
-  { key:"tds",               label:"Technical Data Sheet",       icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications" },
-  { key:"warranty",          label:"Draft Warranty Certificate", icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms" },
-  { key:"origin",            label:"Country of Origin",          icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin" },
-  { key:"compliance",        label:"Compliance Statement",       icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration" },
-  { key:"test_cert",         label:"Test Certificate",           icon:"🧪", aiGenerated:true,  manual:false, description:"Product test results & lab certificate" },
-  { key:"material_schedule", label:"Material Schedule",          icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project" },
-  { key:"brochure",          label:"Product Brochure",           icon:"📖", aiGenerated:false, manual:true,  description:"Manufacturer catalogue / product brochure" },
-  { key:"shop_drawing",      label:"Shop Drawing",               icon:"📐", aiGenerated:false, manual:true,  description:"Technical shop drawings & installation details" },
-  { key:"sample_photo",      label:"Sample Photo",               icon:"📷", aiGenerated:false, manual:true,  description:"Product sample photographs" },
+  { key:"cover",             label:"Cover Page",                      icon:"📄", aiGenerated:false, manual:false, description:"Submittal cover with project details" },
+  { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications" },
+  { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms" },
+  { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin" },
+  { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration" },
+  { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:true,  manual:false, description:"Product test results & lab certificate" },
+  { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project" },
+  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter" },
+  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document" },
+  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product" },
+  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences" },
+  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list" },
 ];
 
 const PRESETS = {
-  "Municipality":      ["cover","tds","warranty","origin","compliance","material_schedule"],
-  "Private Developer": ["cover","tds","warranty","brochure","sample_photo"],
-  "DEWA / Utility":    ["cover","tds","warranty","origin","compliance","test_cert","material_schedule"],
+  "Municipality":      ["cover","tds","warranty","origin","compliance","material_schedule","previous_approval","iso_cert"],
+  "Private Developer": ["cover","tds","warranty","previous_approval","trade_license"],
+  "DEWA / Utility":    ["cover","tds","warranty","origin","compliance","test_cert","material_schedule","iso_cert"],
   "Full Package":      DOC_TYPES.map(d=>d.key),
 };
 
@@ -100,7 +103,14 @@ function LibraryModal({ allFiles, loading, error, onPick, onClose }) {
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function SubmittalBuilder() {
   const [step, setStep]               = useState(1);
-  const [info, setInfo]               = useState({ projectName:"", client:"", consultant:"", location:"", product:"", supplier:"", date:new Date().toISOString().split("T")[0], additionalInfo:"" });
+  const [info, setInfo]               = useState({
+    projectName:"", client:"", mainContractor:"", consultant:"", location:"",
+    productName:"", supplier:"",
+    materialSpec:"", dimensions:"", material:"", finish:"",
+    productWarranty:"", productList:"",
+    date:new Date().toISOString().split("T")[0],
+    additionalInfo:""
+  });
   const [selected, setSelected]       = useState(new Set(["cover","tds","warranty"]));
   const [generated, setGenerated]     = useState({});
   const [manualFiles, setManualFiles] = useState({});
@@ -130,13 +140,18 @@ export default function SubmittalBuilder() {
   const openLibrary = useCallback(docKey => { setLibraryTarget(docKey); setLibraryOpen(true); }, []);
   const pickFile    = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); }, [libraryTarget]);
 
-  const step1Valid = info.projectName && info.client && info.product && info.supplier;
+  const step1Valid = info.projectName && info.client && info.productName;
 
   const handleGenerate = async () => {
-    if (!WEBHOOK_URL) { setError("VITE_N8N_WEBHOOK_URL not set in .env"); return; }
+    const url = FILL_URL || WEBHOOK_URL;
+    if (!url) { setError("Webhook URL not set in .env"); return; }
     setLoading(true); setError(""); setStep(3);
     try {
-      const res = await fetch(WEBHOOK_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ projectInfo:info, selectedDocs:[...selected] }) });
+      const res = await fetch(url, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ projectInfo: info, selectedDocs:[...selected] })
+      });
       if (!res.ok) throw new Error(`n8n returned ${res.status}`);
       const data = await res.json();
       if (data.success && data.documents) {
@@ -169,8 +184,15 @@ export default function SubmittalBuilder() {
       html += `<div class="page">`;
       if (doc.key==="cover") {
         html += `<div class="cover"><div style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#666;margin-bottom:20px">MATERIAL SUBMITTAL</div>
-          <h1>${info.projectName||"[Project Name]"}</h1><h2>${info.product||"[Product]"}</h2>
-          <div class="meta">${[["Client",info.client],["Consultant",info.consultant||"—"],["Supplier",info.supplier],["Location",info.location||"—"],["Date",info.date]].map(([k,v])=>`<div><span>${k}</span><span>${v}</span></div>`).join("")}</div></div>`;
+          <h1>${info.projectName||"[Project Name]"}</h1><h2>${info.productName||"[Product]"}</h2>
+          <div class="meta">${[
+            ["Client",info.client],
+            ["Main Contractor",info.mainContractor||"—"],
+            ["Consultant",info.consultant||"—"],
+            ["Supplier",info.supplier||"—"],
+            ["Location",info.location||"—"],
+            ["Date",info.date]
+          ].map(([k,v])=>`<div><span>${k}</span><span>${v}</span></div>`).join("")}</div></div>`;
       } else if (doc.aiGenerated && generated[doc.key]) {
         html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div><div class="dc">${generated[doc.key]}</div>`;
       } else if (doc.manual && manualFiles[doc.key]) {
@@ -237,28 +259,68 @@ export default function SubmittalBuilder() {
           <div>
             <div style={{ marginBottom:28 }}>
               <h2 style={{ color:C.textBright, fontSize:20, fontWeight:700, margin:"0 0 6px" }}>Project Information</h2>
-              <p style={{ color:C.textDim, margin:0, fontSize:13 }}>Gemini uses this to auto-fill all AI documents.</p>
+              <p style={{ color:C.textDim, margin:0, fontSize:13 }}>Used to fill all AI documents and cover page.</p>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-              {[
-                { f:"projectName", l:"Project Name",            p:"e.g. Marina Bay Landscaping Phase 2", span:true },
-                { f:"client",      l:"Client / Main Contractor", p:"e.g. Al Futtaim Construction LLC" },
-                { f:"consultant",  l:"Consultant",               p:"e.g. Atkins Middle East (optional)" },
-                { f:"location",    l:"Project Location",         p:"e.g. Dubai, UAE" },
-                { f:"product",     l:"Product / Material",       p:"e.g. Porcelain Outdoor Paving 600×600mm" },
-                { f:"supplier",    l:"Supplier / Manufacturer",  p:"e.g. Bluestream Trading LLC" },
-                { f:"date",        l:"Submittal Date",           p:"", type:"date" },
-              ].map(({ f,l,p,span,type })=>(
-                <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
-                  <label style={lbl}>{l}</label>
-                  <input type={type||"text"} value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
-                </div>
-              ))}
-              <div style={{ gridColumn:"1/-1" }}>
-                <label style={lbl}>Additional Details <span style={{ color:C.textDim, fontWeight:400 }}>(optional)</span></label>
-                <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo",e.target.value)} placeholder="Color codes, finishes, specific standards, certifications…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
+
+            {/* PROJECT DETAILS */}
+            <div style={{ marginBottom:8 }}>
+              <div style={{ color:C.textDim, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12, paddingBottom:6, borderBottom:`1px solid ${C.border}` }}>Project Details</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                {[
+                  { f:"projectName",    l:"Project Name *",         p:"e.g. Marina Bay Landscaping Phase 2", span:true },
+                  { f:"client",         l:"Client *",               p:"e.g. Al Futtaim Group" },
+                  { f:"mainContractor", l:"Main Contractor",        p:"e.g. Al Futtaim Construction LLC" },
+                  { f:"consultant",     l:"Consultant",             p:"e.g. Atkins Middle East (optional)" },
+                  { f:"location",       l:"Project Location",       p:"e.g. Dubai, UAE" },
+                  { f:"date",           l:"Submittal Date",         p:"", type:"date" },
+                ].map(({ f,l,p,span,type })=>(
+                  <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
+                    <label style={lbl}>{l}</label>
+                    <input type={type||"text"} value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
+                  </div>
+                ))}
               </div>
             </div>
+
+            {/* PRODUCT DETAILS */}
+            <div style={{ marginTop:24, marginBottom:8 }}>
+              <div style={{ color:C.textDim, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12, paddingBottom:6, borderBottom:`1px solid ${C.border}` }}>Product / Material Details</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                {[
+                  { f:"productName",    l:"Product Name *",         p:"e.g. Porcelain Outdoor Paving 600×600mm", span:true },
+                  { f:"supplier",       l:"Supplier / Manufacturer", p:"e.g. Bluestream Trading LLC" },
+                  { f:"materialSpec",   l:"Material Specification",  p:"e.g. EN 13748-2, Class R11 anti-slip" },
+                  { f:"dimensions",     l:"Dimensions",              p:"e.g. 600×600×20mm" },
+                  { f:"material",       l:"Material",                p:"e.g. Porcelain Stoneware" },
+                  { f:"finish",         l:"Finish",                  p:"e.g. Matt, Textured" },
+                ].map(({ f,l,p,span })=>(
+                  <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
+                    <label style={lbl}>{l}</label>
+                    <input type="text" value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* WARRANTY & COO */}
+            <div style={{ marginTop:24, marginBottom:8 }}>
+              <div style={{ color:C.textDim, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:12, paddingBottom:6, borderBottom:`1px solid ${C.border}` }}>Warranty & Origin</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                <div>
+                  <label style={lbl}>Product Warranty</label>
+                  <input type="text" value={info.productWarranty} onChange={e=>set("productWarranty",e.target.value)} placeholder="e.g. 10 years manufacturer warranty" style={inputSt}/>
+                </div>
+                <div>
+                  <label style={lbl}>Product List <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(for COO)</span></label>
+                  <input type="text" value={info.productList} onChange={e=>set("productList",e.target.value)} placeholder="e.g. Paving tiles, edging, adhesive" style={inputSt}/>
+                </div>
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lbl}>Additional Details <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
+                  <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo",e.target.value)} placeholder="Color codes, specific standards, certifications, notes for Gemini…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
+                </div>
+              </div>
+            </div>
+
             <div style={{ marginTop:28, display:"flex", justifyContent:"flex-end" }}>
               <button onClick={()=>setStep(2)} disabled={!step1Valid} style={{ ...btnP, opacity:step1Valid?1:0.35, cursor:step1Valid?"pointer":"not-allowed" }}>
                 Next: Select Indexes →
@@ -352,8 +414,8 @@ export default function SubmittalBuilder() {
           <div style={{ textAlign:"center", padding:"80px 40px" }}>
             <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
             <div style={{ width:72, height:72, borderRadius:"50%", border:`3px solid ${C.border}`, borderTopColor:C.accent, margin:"0 auto 32px", animation:"spin 1s linear infinite" }}/>
-            <h2 style={{ color:C.textBright, fontSize:22, fontWeight:700, margin:"0 0 12px" }}>Gemini is Writing Your Documents</h2>
-            <p style={{ color:C.textDim, fontSize:14, maxWidth:400, margin:"0 auto" }}>n8n calling Gemini for each AI document. ~15–30 seconds.</p>
+            <h2 style={{ color:C.textBright, fontSize:22, fontWeight:700, margin:"0 0 12px" }}>Filling Your Documents</h2>
+            <p style={{ color:C.textDim, fontSize:14, maxWidth:400, margin:"0 auto" }}>n8n copying templates and filling placeholders. ~15–30 seconds.</p>
             <div style={{ marginTop:32, display:"flex", justifyContent:"center", gap:8 }}>
               {DOC_TYPES.filter(d=>d.aiGenerated&&selected.has(d.key)).map((doc,i)=>(
                 <div key={doc.key} style={{ fontSize:22, animation:`pulse 1.5s ease-in-out ${i*0.2}s infinite` }} title={doc.label}>{doc.icon}</div>
@@ -385,7 +447,9 @@ export default function SubmittalBuilder() {
                         <div style={{ color:active?C.accent:C.text, fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doc.label}</div>
                         <div style={{ fontSize:11, marginTop:2, color:ok?C.green:C.textDim }}>
                           {doc.key==="cover"?"✓ auto"
-                            :doc.aiGenerated?(generated[doc.key]?"✓ Gemini filled":"⚠ not filled")
+                            :doc.aiGenerated?(generated[doc.key]
+                              ? <><a href={generated[doc.key].viewLink} target="_blank" rel="noreferrer" style={{ color:C.blue, fontSize:11 }}>View</a> · <a href={generated[doc.key].downloadLink} style={{ color:C.green, fontSize:11 }}>Download</a></>
+                              : "⚠ not filled")
                             :doc.manual?(manualFiles[doc.key]?"✓ "+manualFiles[doc.key].name.slice(0,16)+"…":"● no file")
                             :"✓"}
                         </div>
@@ -398,14 +462,14 @@ export default function SubmittalBuilder() {
               <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", display:"flex", flexDirection:"column", minHeight:520 }}>
                 {activeDoc ? (()=>{
                   const doc = DOC_TYPES.find(d=>d.key===activeDoc);
-                  const content = generated[activeDoc];
+                  const docResult = generated[activeDoc];
                   const driveFile = manualFiles[activeDoc];
                   return (
                     <>
                       <div style={{ padding:"13px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
                         <span style={{ fontSize:20 }}>{doc.icon}</span>
                         <span style={{ color:C.textBright, fontWeight:600, fontSize:14 }}>{doc.label}</span>
-                        {doc.aiGenerated && <span style={{ fontSize:10, background:`${C.blue}18`, color:C.blue, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.blue}33`, fontWeight:700 }}>GEMINI</span>}
+                        {doc.aiGenerated && <span style={{ fontSize:10, background:`${C.blue}18`, color:C.blue, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.blue}33`, fontWeight:700 }}>TEMPLATE FILLED</span>}
                         {doc.manual && <span style={{ fontSize:10, background:`${C.purple}18`, color:C.purple, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.purple}33`, fontWeight:700 }}>DRIVE PDF</span>}
                         <div style={{ flex:1 }}/>
                         <span style={{ fontSize:11, color:C.textDim }}>{info.projectName}</span>
@@ -415,18 +479,37 @@ export default function SubmittalBuilder() {
                           <div style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"48px 32px", textAlign:"center" }}>
                             <div style={{ fontSize:11, letterSpacing:"0.18em", color:C.textDim, marginBottom:16 }}>MATERIAL SUBMITTAL</div>
                             <div style={{ fontSize:24, fontWeight:800, color:C.textBright, marginBottom:6 }}>{info.projectName||"[Project Name]"}</div>
-                            <div style={{ fontSize:16, color:C.accent, marginBottom:32 }}>{info.product||"[Product]"}</div>
+                            <div style={{ fontSize:16, color:C.accent, marginBottom:32 }}>{info.productName||"[Product]"}</div>
                             <div style={{ display:"inline-block", textAlign:"left" }}>
-                              {[["Client",info.client],["Consultant",info.consultant||"—"],["Supplier",info.supplier],["Location",info.location||"—"],["Date",info.date]].map(([k,v])=>(
+                              {[
+                                ["Client",info.client],
+                                ["Main Contractor",info.mainContractor||"—"],
+                                ["Consultant",info.consultant||"—"],
+                                ["Supplier",info.supplier||"—"],
+                                ["Location",info.location||"—"],
+                                ["Date",info.date]
+                              ].map(([k,v])=>(
                                 <div key={k} style={{ display:"flex", gap:16, marginBottom:10, fontSize:13 }}>
-                                  <span style={{ color:C.textDim, minWidth:90 }}>{k}</span>
+                                  <span style={{ color:C.textDim, minWidth:110 }}>{k}</span>
                                   <span style={{ color:C.text }}>{v}</span>
                                 </div>
                               ))}
                             </div>
                           </div>
-                        ) : content ? (
-                          <pre style={{ color:C.text, whiteSpace:"pre-wrap", fontFamily:"monospace", fontSize:12, lineHeight:1.8, margin:0 }}>{content}</pre>
+                        ) : docResult ? (
+                          <div style={{ textAlign:"center", padding:"48px 32px" }}>
+                            <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
+                            <div style={{ fontWeight:700, fontSize:16, color:C.textBright, marginBottom:8 }}>{doc.label} — Filled</div>
+                            <div style={{ fontSize:13, color:C.textDim, marginBottom:28 }}>Template filled and saved to Google Drive</div>
+                            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+                              <a href={docResult.viewLink} target="_blank" rel="noreferrer" style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:6, color:C.blue, padding:"10px 22px", fontSize:13, fontWeight:600, textDecoration:"none" }}>
+                                📄 Open in Drive
+                              </a>
+                              <a href={docResult.downloadLink} target="_blank" rel="noreferrer" style={{ background:`${C.green}18`, border:`1px solid ${C.green}44`, borderRadius:6, color:C.green, padding:"10px 22px", fontSize:13, fontWeight:600, textDecoration:"none" }}>
+                                ⬇ Download DOCX
+                              </a>
+                            </div>
+                          </div>
                         ) : driveFile ? (
                           <div style={{ textAlign:"center", padding:"60px 40px" }}>
                             <div style={{ fontSize:52, marginBottom:16 }}>📄</div>
