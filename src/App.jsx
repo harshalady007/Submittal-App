@@ -241,7 +241,7 @@ export default function SubmittalBuilder() {
             ["Date",info.date]
           ].map(([k,v])=>`<div><span>${k}</span><span>${v}</span></div>`).join("")}</div></div>`;
       } else if (doc.aiGenerated && generated[doc.key]) {
-        html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div><div class="dc">${generated[doc.key]}</div>`;
+        const docResult = generated[doc.key]; const vl = docResult?.viewLink || ""; html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div><div class="dr"><div style="font-size:13px;color:#666;margin-bottom:10px">Template filled — saved to Google Drive</div><a href="${vl}" target="_blank">Open in Drive →</a></div>`;
       } else if (doc.manual && manualFiles[doc.key]) {
         const f = manualFiles[doc.key];
         html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div>
