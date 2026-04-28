@@ -210,56 +210,8 @@ export default function SubmittalBuilder() {
     finally { setLoading(false); }
   };
 
-  const exportPDF = () => {
-    const win = window.open("","_blank");
-    const ordered = DOC_TYPES.filter(d=>selected.has(d.key));
-    let html = `<html><head><title>Submittal – ${info.projectName}</title><style>
-*{box-sizing:border-box} body{font-family:Arial,sans-serif;color:#222;background:#fff;margin:0;padding:0}
-.page{page-break-after:always;padding:48px 56px;min-height:100vh} .page:last-child{page-break-after:auto}
-.cover{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:90vh}
-.cover h1{font-size:32px;color:#0a1c3b;margin:0 0 8px} .cover h2{font-size:20px;color:#c47a00;margin:0 0 40px;font-weight:500}
-.meta{border-top:1px solid #ddd;padding-top:24px;width:360px;text-align:left}
-.meta div{display:flex;gap:12px;margin-bottom:10px;font-size:13px} .meta span:first-child{color:#888;width:90px;flex-shrink:0}
-.dh{border-bottom:2px solid #0a1c3b;padding-bottom:8px;margin-bottom:24px;display:flex;align-items:center;gap:10px}
-.dh h2{margin:0;font-size:18px;color:#0a1c3b} .dc{white-space:pre-wrap;font-size:13px;line-height:1.75;color:#333}
-.dr{border:1px solid #1a56db;border-radius:6px;padding:28px;text-align:center;margin-top:8px}
-.dr a{color:#1a56db;font-size:14px;font-weight:600}
-.ph{border:2px dashed #ccc;border-radius:6px;padding:40px;text-align:center;color:#999;font-size:13px}
-@media print{.page{page-break-after:always}}
-</style></head><body>`;
-    ordered.forEach(doc => {
-      html += `<div class="page">`;
-      if (doc.key==="cover") {
-        html += `<div class="cover"><div style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#666;margin-bottom:20px">MATERIAL SUBMITTAL</div>
-          <h1>${info.projectName||"[Project Name]"}</h1><h2>${info.productName||"[Product]"}</h2>
-          <div class="meta">${[
-            ["Client",info.client],
-            ["Main Contractor",info.mainContractor||"—"],
-            ["Consultant",info.consultant||"—"],
-            ["Supplier",info.supplier||"—"],
-            ["Location",info.location||"—"],
-            ["Date",info.date]
-          ].map(([k,v])=>`<div><span>${k}</span><span>${v}</span></div>`).join("")}</div></div>`;
-      } else if (doc.aiGenerated && generated[doc.key]) {
-        const docResult = generated[doc.key]; const vl = docResult?.viewLink || ""; html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div><div class="dr"><div style="font-size:13px;color:#666;margin-bottom:10px">Template filled — saved to Google Drive</div><a href="${vl}" target="_blank">Open in Drive →</a></div>`;
-      } else if (doc.manual && manualFiles[doc.key]) {
-        const f = manualFiles[doc.key];
-        html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div>
-          <div class="dr">
-            <div style="font-size:13px;color:#666;margin-bottom:10px">Google Drive Document</div>
-            <div style="font-size:16px;font-weight:700;color:#222;margin-bottom:18px">${f.name}</div>
-            <a href="${f.webViewLink}" target="_blank">Open PDF in Google Drive →</a>
-            <div style="font-size:11px;color:#999;margin-top:14px">Merge this PDF at this position before final submission</div>
-          </div>`;
-      } else {
-        html += `<div class="dh"><span style="font-size:20px">${doc.icon}</span><h2>${doc.label}</h2></div><div class="ph">[ ${doc.label} ] — No content assigned</div>`;
-      }
-      html += `</div>`;
-    });
-    html += `</body></html>`;
-    win.document.write(html); win.document.close();
-    setTimeout(()=>win.print(), 600);
-  };
+  // exportPDF removed — was producing placeholder cards instead of real document content.
+  // All export buttons now call handleMerge which fetches actual filled docs + Drive PDFs and merges via ilovepdf.
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
   return (
@@ -479,7 +431,9 @@ export default function SubmittalBuilder() {
                 <h2 style={{ color:C.textBright, fontSize:20, fontWeight:700, margin:"0 0 4px" }}>Preview & Export</h2>
                 <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled</p>
               </div>
-              <button onClick={exportPDF} style={{ ...btnP, display:"flex", alignItems:"center", gap:7 }}>⬇ Export PDF Package</button>
+              <button onClick={handleMerge} disabled={merging} style={{ ...btnP, display:"flex", alignItems:"center", gap:7, opacity:merging?0.6:1 }}>
+                {merging ? "⏳ Merging…" : "📦 Download Merged PDF"}
+              </button>
             </div>
 
             <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:16 }}>
@@ -594,7 +548,6 @@ export default function SubmittalBuilder() {
               <button onClick={()=>{ setStep(2); setGenerated({}); setActiveDoc(null); }} style={btnG}>← Rebuild</button>
               <div style={{ display:"flex", gap:10, alignItems:"center" }}>
                 {mergeError && <span style={{ fontSize:12, color:"#fca5a5" }}>⚠ {mergeError}</span>}
-                <button onClick={exportPDF} style={btnG}>⬇ Export HTML Preview</button>
                 <button onClick={handleMerge} disabled={merging} style={{ ...btnP, opacity:merging?0.6:1, display:"flex", alignItems:"center", gap:7 }}>
                   {merging ? "⏳ Merging…" : "📦 Download Merged PDF"}
                 </button>
