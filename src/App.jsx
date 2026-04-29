@@ -5,7 +5,7 @@ const WEBHOOK_URL         = import.meta.env.VITE_N8N_WEBHOOK_URL         || "";
 const LIBRARY_WEBHOOK_URL = import.meta.env.VITE_N8N_LIBRARY_WEBHOOK_URL || "";
 const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
-const ILOVEPDF_KEY        = import.meta.env.VITE_ILOVEPDF_KEY            || "";
+const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 
 // ── DATA ───────────────────────────────────────────────────────────────────────
 const DOC_TYPES = [
@@ -173,7 +173,7 @@ export default function SubmittalBuilder() {
       const outputName = (info.projectName || "Submittal").replace(/[^a-zA-Z0-9_-]/g,"_") + "_Submittal";
       const res = await fetch(MERGE_URL, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ filledDocs, driveFileIds, outputName, ilovepdfKey: ILOVEPDF_KEY })
+        body: JSON.stringify({ filledDocs, driveFileIds, outputName, pdfcoKey: PDFCO_KEY })
       });
       if (!res.ok) throw new Error(`Merge failed: ${res.status}`);
       const data = await res.json();
@@ -211,7 +211,7 @@ export default function SubmittalBuilder() {
   };
 
   // exportPDF removed — was producing placeholder cards instead of real document content.
-  // All export buttons now call handleMerge which fetches actual filled docs + Drive PDFs and merges via ilovepdf.
+  // All export buttons now call handleMerge which fetches actual filled docs + Drive PDFs and merges via PDF.co.
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
   return (
