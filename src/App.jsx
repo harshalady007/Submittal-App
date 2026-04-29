@@ -5,6 +5,7 @@ const WEBHOOK_URL         = import.meta.env.VITE_N8N_WEBHOOK_URL         || "";
 const LIBRARY_WEBHOOK_URL = import.meta.env.VITE_N8N_LIBRARY_WEBHOOK_URL || "";
 const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
+const MERGE_FETCH_URL     = import.meta.env.VITE_N8N_MERGE_FETCH_URL     || "";
 const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 
 // Drive folder roots (used to auto-prefer files from specific folders for specific doc types)
@@ -253,12 +254,14 @@ export default function SubmittalBuilder() {
   }, []);
   const pickFile    = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); setLibraryStartFolder(null); }, [libraryTarget]);
 
-  const [merging, setMerging]   = useState(false);
+  const [merging, setMerging]     = useState(false);
   const [mergeError, setMergeError] = useState("");
+  const [mergeStatus, setMergeStatus] = useState(""); // user-visible progress text
 
   const handleMerge = async () => {
-    if (!MERGE_URL) { setMergeError("VITE_N8N_MERGE_URL not set"); return; }
-    setMerging(true); setMergeError("");
+    if (!MERGE_URL)       { setMergeError("VITE_N8N_MERGE_URL not set"); return; }
+    if (!MERGE_FETCH_URL) { setMergeError("VITE_N8N_MERGE_FETCH_URL not set"); return; }
+    setMerging(true); setMergeError(""); setMergeStatus("Preparing files…");
     try {
       const filledDocs = DOC_TYPES
         .filter(d => d.aiGenerated && selected.has(d.key) && generated[d.key])
@@ -267,19 +270,54 @@ export default function SubmittalBuilder() {
         .filter(d => d.manual && selected.has(d.key) && manualFiles[d.key])
         .map(d => ({ docKey: d.key, fileId: manualFiles[d.key].id }));
       const outputName = (info.projectName || "Submittal").replace(/[^a-zA-Z0-9_-]/g,"_") + "_Submittal";
-      const res = await fetch(MERGE_URL, {
+
+      // Phase 1: kick off async merge
+      setMergeStatus("Uploading documents…");
+      const startRes = await fetch(MERGE_URL, {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ filledDocs, driveFileIds, outputName, pdfcoKey: PDFCO_KEY })
       });
-      if (!res.ok) throw new Error(`Merge failed: ${res.status}`);
-      const data = await res.json();
-      if (!data.success || !data.pdfBase64) throw new Error("No PDF returned");
-      const blob = new Blob([Uint8Array.from(atob(data.pdfBase64), c=>c.charCodeAt(0))], { type:"application/pdf" });
+      if (!startRes.ok) throw new Error(`Merge start failed: ${startRes.status}`);
+      const startData = await startRes.json();
+      if (!startData.success || !startData.jobId) throw new Error(startData.message || "No jobId returned");
+      const { jobId, mergedUrl, fileCount } = startData;
+
+      // Phase 2: poll fetch endpoint until ready
+      setMergeStatus("Merging PDFs…");
+      const sleep = (ms) => new Promise(r=>setTimeout(r, ms));
+      const maxAttempts = 90; // ~6 minutes max
+      let pdfBase64 = null;
+      let filename  = outputName + ".pdf";
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await sleep(attempt <= 3 ? 2500 : 4000);
+        const pollRes = await fetch(MERGE_FETCH_URL, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ jobId, mergedUrl, pdfcoKey: PDFCO_KEY, outputName, fileCount })
+        });
+        if (!pollRes.ok) {
+          // transient — keep polling unless it persists
+          if (attempt > 5) throw new Error(`Merge fetch failed: ${pollRes.status}`);
+          continue;
+        }
+        const pollData = await pollRes.json();
+        if (pollData.error) throw new Error(pollData.message || "Merge job failed");
+        if (pollData.ready && pollData.pdfBase64) {
+          pdfBase64 = pollData.pdfBase64;
+          filename  = pollData.filename || filename;
+          setMergeStatus("Downloading…");
+          break;
+        }
+        setMergeStatus(`Merging PDFs… (${attempt * 4}s)`);
+      }
+      if (!pdfBase64) throw new Error("Merge timed out — try again or split into fewer documents");
+
+      const blob = new Blob([Uint8Array.from(atob(pdfBase64), c=>c.charCodeAt(0))], { type:"application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = outputName + ".pdf"; a.click();
+      a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
-    } catch(e) { setMergeError(e.message); }
+      setMergeStatus("");
+    } catch(e) { setMergeError(e.message); setMergeStatus(""); }
     finally { setMerging(false); }
   };
 
@@ -528,7 +566,7 @@ export default function SubmittalBuilder() {
                 <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled</p>
               </div>
               <button onClick={handleMerge} disabled={merging} style={{ ...btnP, display:"flex", alignItems:"center", gap:7, opacity:merging?0.6:1 }}>
-                {merging ? "⏳ Merging…" : "📦 Download Merged PDF"}
+                {merging ? `⏳ ${mergeStatus || "Working…"}` : "📦 Download Merged PDF"}
               </button>
             </div>
 
@@ -644,8 +682,9 @@ export default function SubmittalBuilder() {
               <button onClick={()=>{ setStep(2); setGenerated({}); setActiveDoc(null); }} style={btnG}>← Rebuild</button>
               <div style={{ display:"flex", gap:10, alignItems:"center" }}>
                 {mergeError && <span style={{ fontSize:12, color:"#fca5a5" }}>⚠ {mergeError}</span>}
+                {merging && mergeStatus && !mergeError && <span style={{ fontSize:12, color:C.blue }}>{mergeStatus}</span>}
                 <button onClick={handleMerge} disabled={merging} style={{ ...btnP, opacity:merging?0.6:1, display:"flex", alignItems:"center", gap:7 }}>
-                  {merging ? "⏳ Merging…" : "📦 Download Merged PDF"}
+                  {merging ? `⏳ ${mergeStatus || "Working…"}` : "📦 Download Merged PDF"}
                 </button>
               </div>
             </div>
