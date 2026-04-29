@@ -7,6 +7,10 @@ const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
 const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 
+// Drive folder roots (used to auto-prefer files from specific folders for specific doc types)
+const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs"; // top-level "documents" folder
+const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS"; // 7. Material Test certificates
+
 // ── DATA ───────────────────────────────────────────────────────────────────────
 const DOC_TYPES = [
   { key:"cover",             label:"Cover Page",                      icon:"📄", aiGenerated:false, manual:false, description:"Submittal cover with project details" },
@@ -14,19 +18,21 @@ const DOC_TYPES = [
   { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms" },
   { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin" },
   { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration" },
-  { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:true,  manual:false, description:"Product test results & lab certificate" },
+  { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:false, manual:true,  description:"Product test results & lab certificate", autoKeywords:["test certificate","test cert","test report"], defaultFolder:TEST_CERT_FOLDER },
   { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project" },
   { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", autoKeywords:["approval","approved"] },
   { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document",                autoKeywords:["trade license","trade licence"] },
   { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product",            autoKeywords:["msds","safety data","sds"] },
   { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences",        autoKeywords:["iso","certification"] },
   { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list",           autoKeywords:["vendor","vendor list","supplier list"] },
+  { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive",         autoKeywords:["company profile","bluestream profile"] },
+  { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive",             autoKeywords:["project reference","reference list"] },
 ];
 
 const PRESETS = {
-  "Municipality":      ["cover","tds","warranty","origin","compliance","material_schedule","previous_approval","iso_cert"],
-  "Private Developer": ["cover","tds","warranty","previous_approval","trade_license"],
-  "DEWA / Utility":    ["cover","tds","warranty","origin","compliance","test_cert","material_schedule","iso_cert"],
+  "Municipality":      ["cover","tds","warranty","origin","compliance","material_schedule","previous_approval","iso_cert","company_profile","project_reference"],
+  "Private Developer": ["cover","tds","warranty","previous_approval","trade_license","company_profile"],
+  "DEWA / Utility":    ["cover","tds","warranty","origin","compliance","test_cert","material_schedule","iso_cert","company_profile","project_reference"],
   "Full Package":      DOC_TYPES.map(d=>d.key),
 };
 
@@ -46,52 +52,134 @@ const btnG = { background:"transparent", color:C.text, border:`1px solid ${C.bor
 const lbl  = { color:C.textDim, fontSize:11, fontWeight:700, letterSpacing:"0.09em", textTransform:"uppercase", marginBottom:6, display:"block" };
 
 // ── LIBRARY MODAL ──────────────────────────────────────────────────────────────
-function LibraryModal({ allFiles, loading, error, onPick, onClose }) {
-  const [search, setSearch] = useState("");
-  const filtered = allFiles.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+function LibraryModal({ libraryUrl, startFolder, fallbackFiles, fallbackError, onPick, onClose }) {
+  const [search, setSearch]   = useState("");
+  const [folders, setFolders] = useState([]);
+  const [files, setFiles]     = useState([]);
+  const [stack, setStack]     = useState([]); // breadcrumb [{id, name}]
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+
+  const loadFolder = useCallback((folderId, breadcrumb) => {
+    if (!libraryUrl) {
+      setFiles(fallbackFiles || []);
+      setFolders([]);
+      setError(fallbackError || "");
+      return;
+    }
+    setLoading(true); setError("");
+    const sep = libraryUrl.includes("?") ? "&" : "?";
+    const url = folderId ? libraryUrl + sep + "folder=" + encodeURIComponent(folderId) : libraryUrl;
+    fetch(url)
+      .then(r => r.json())
+      .then(d => {
+        setFolders(d.folders || []);
+        setFiles(d.files || []);
+        if (breadcrumb) setStack(breadcrumb);
+        setSearch("");
+      })
+      .catch(e => setError(e.message || "Failed to load folder"))
+      .finally(() => setLoading(false));
+  }, [libraryUrl, fallbackFiles, fallbackError]);
+
+  useEffect(() => {
+    if (startFolder) loadFolder(startFolder, [{ id: startFolder, name: "Selected Folder" }]);
+    else loadFolder(null, []);
+  }, [startFolder, loadFolder]);
+
+  const enterFolder = (folder) => loadFolder(folder.id, [...stack, { id: folder.id, name: folder.name }]);
+  const goUp = () => {
+    if (stack.length === 0) return;
+    const newStack = stack.slice(0, -1);
+    const parent = newStack[newStack.length - 1];
+    loadFolder(parent ? parent.id : null, newStack);
+  };
+  const goRoot = () => loadFolder(null, []);
+
+  const term = search.trim().toLowerCase();
+  const filteredFolders = term ? folders.filter(f => f.name.toLowerCase().includes(term)) : folders;
+  const filteredFiles   = term ? files.filter(f => f.name.toLowerCase().includes(term))   : files;
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, width:"min(640px,100%)", maxHeight:"80vh", display:"flex", flexDirection:"column" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, width:"min(720px,100%)", maxHeight:"85vh", display:"flex", flexDirection:"column" }}>
         <div style={{ padding:"16px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:12 }}>
           <span style={{ fontSize:22 }}>🗂️</span>
-          <div>
+          <div style={{ flex:1, minWidth:0 }}>
             <div style={{ color:C.textBright, fontWeight:700, fontSize:15 }}>Google Drive Library</div>
-            <div style={{ color:C.textDim, fontSize:12 }}>{allFiles.length} PDFs available</div>
+            <div style={{ color:C.textDim, fontSize:12, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+              <span style={{ cursor:"pointer", color: stack.length===0 ? C.textBright : C.blue }} onClick={goRoot}>Root</span>
+              {stack.map((b, i) => (
+                <span key={b.id}>
+                  <span style={{ color:C.textDim, margin:"0 6px" }}>›</span>
+                  <span style={{ color: i===stack.length-1 ? C.textBright : C.blue, cursor: i===stack.length-1 ? "default" : "pointer" }}
+                    onClick={()=>{ if (i!==stack.length-1) loadFolder(b.id, stack.slice(0, i+1)); }}>
+                    {b.name}
+                  </span>
+                </span>
+              ))}
+            </div>
           </div>
-          <div style={{ flex:1 }}/>
           <button onClick={onClose} style={{ background:"transparent", border:"none", color:C.textDim, fontSize:22, cursor:"pointer", lineHeight:1, padding:"0 4px" }}>×</button>
         </div>
 
-        <div style={{ padding:"12px 20px", borderBottom:`1px solid ${C.border}` }}>
-          <input type="text" placeholder="Search files…" value={search} onChange={e=>setSearch(e.target.value)} style={{ ...inputSt, padding:"8px 12px" }} autoFocus/>
+        <div style={{ padding:"12px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", gap:8, alignItems:"center" }}>
+          {stack.length > 0 && <button onClick={goUp} style={{ ...btnG, padding:"6px 10px", fontSize:12 }}>← Up</button>}
+          <input type="text" placeholder="Search this folder…" value={search} onChange={e=>setSearch(e.target.value)} style={{ ...inputSt, padding:"8px 12px" }} autoFocus/>
         </div>
 
         <div style={{ flex:1, overflowY:"auto", padding:"10px 12px" }}>
-          {loading && <div style={{ textAlign:"center", padding:"48px", color:C.textDim, fontSize:13 }}>Loading Drive files…</div>}
-          {error && <div style={{ padding:"16px", background:"#3b0000", border:"1px solid #ef4444", borderRadius:8, color:"#fca5a5", fontSize:13 }}>⚠ {error}<br/><span style={{ fontSize:11, opacity:.7 }}>Make sure the Library workflow is active and VITE_N8N_LIBRARY_WEBHOOK_URL is set.</span></div>}
-          {!loading && !error && filtered.length===0 && (
+          {loading && <div style={{ textAlign:"center", padding:"48px", color:C.textDim, fontSize:13 }}>Loading…</div>}
+          {error && <div style={{ padding:"16px", background:"#3b0000", border:"1px solid #ef4444", borderRadius:8, color:"#fca5a5", fontSize:13 }}>⚠ {error}<br/><span style={{ fontSize:11, opacity:.7 }}>Make sure VITE_N8N_LIBRARY_WEBHOOK_URL is set.</span></div>}
+
+          {!loading && !error && filteredFolders.length===0 && filteredFiles.length===0 && (
             <div style={{ textAlign:"center", padding:"48px", color:C.textDim, fontSize:13 }}>
-              {allFiles.length===0 ? "No PDFs found. Is the Library workflow active?" : "No files match your search."}
+              {term ? "No matches in this folder." : "This folder is empty."}
             </div>
           )}
-          {filtered.map(file => (
-            <div key={file.id} onClick={()=>onPick(file)}
-              style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, cursor:"pointer", border:"1px solid transparent", marginBottom:4, transition:"all .1s" }}
-              onMouseEnter={e=>{ e.currentTarget.style.background=C.card2; e.currentTarget.style.borderColor=C.border; }}
-              onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.borderColor="transparent"; }}
-            >
-              <div style={{ width:36, height:44, background:"#1a0800", border:"1px solid #7c2d0033", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:20 }}>📄</div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ color:C.textBright, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{file.name}</div>
-                <div style={{ color:C.textDim, fontSize:11, marginTop:2 }}>PDF • Google Drive</div>
-              </div>
-              <a href={file.webViewLink} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}
-                style={{ color:C.blue, fontSize:11, textDecoration:"none", flexShrink:0, padding:"4px 8px", border:`1px solid ${C.blue}33`, borderRadius:4 }}>
-                Preview
-              </a>
+
+          {!loading && filteredFolders.length > 0 && (
+            <div style={{ marginBottom:6 }}>
+              <div style={{ color:C.textDim, fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", padding:"6px 10px" }}>Folders ({filteredFolders.length})</div>
+              {filteredFolders.map(folder => (
+                <div key={folder.id} onClick={()=>enterFolder(folder)}
+                  style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, cursor:"pointer", border:"1px solid transparent", marginBottom:4, transition:"all .1s" }}
+                  onMouseEnter={e=>{ e.currentTarget.style.background=C.card2; e.currentTarget.style.borderColor=C.border; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.borderColor="transparent"; }}
+                >
+                  <div style={{ width:36, height:30, background:`${C.accent}18`, border:`1px solid ${C.accent}44`, borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:18 }}>📁</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ color:C.textBright, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{folder.name}</div>
+                    <div style={{ color:C.textDim, fontSize:11, marginTop:2 }}>Folder</div>
+                  </div>
+                  <span style={{ color:C.textDim, fontSize:14 }}>›</span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {!loading && filteredFiles.length > 0 && (
+            <div>
+              <div style={{ color:C.textDim, fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", padding:"6px 10px" }}>Files ({filteredFiles.length})</div>
+              {filteredFiles.map(file => (
+                <div key={file.id} onClick={()=>onPick(file)}
+                  style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, cursor:"pointer", border:"1px solid transparent", marginBottom:4, transition:"all .1s" }}
+                  onMouseEnter={e=>{ e.currentTarget.style.background=C.card2; e.currentTarget.style.borderColor=C.border; }}
+                  onMouseLeave={e=>{ e.currentTarget.style.background="transparent"; e.currentTarget.style.borderColor="transparent"; }}
+                >
+                  <div style={{ width:36, height:44, background:"#1a0800", border:"1px solid #7c2d0033", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:20 }}>📄</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ color:C.textBright, fontSize:13, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{file.name}</div>
+                    <div style={{ color:C.textDim, fontSize:11, marginTop:2 }}>{(file.mimeType||"").includes("pdf") ? "PDF" : "File"} • Google Drive</div>
+                  </div>
+                  <a href={file.webViewLink} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}
+                    style={{ color:C.blue, fontSize:11, textDecoration:"none", flexShrink:0, padding:"4px 8px", border:`1px solid ${C.blue}33`, borderRadius:4 }}>
+                    Preview
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={{ padding:"12px 20px", borderTop:`1px solid ${C.border}`, fontSize:12, color:C.textDim }}>
@@ -122,6 +210,7 @@ export default function SubmittalBuilder() {
   const [activePreset, setActivePreset] = useState(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTarget, setLibraryTarget] = useState(null);
+  const [libraryStartFolder, setLibraryStartFolder] = useState(null);
   const [allFiles, setAllFiles]       = useState([]);
   const [libLoading, setLibLoading]   = useState(false);
   const [libError, setLibError]       = useState("");
@@ -132,12 +221,14 @@ export default function SubmittalBuilder() {
     fetch(LIBRARY_WEBHOOK_URL)
       .then(r=>r.json())
       .then(d=>{
-        if (d.files) {
-          setAllFiles(d.files);
+        // backward-compat: old shape was {files:[...]}, new shape is {files,folders,...}
+        const rootFiles = d.files || [];
+        if (rootFiles.length) {
+          setAllFiles(rootFiles);
           // Auto-match files to doc slots by keyword
           const autoMatched = {};
           DOC_TYPES.filter(dt=>dt.manual && dt.autoKeywords).forEach(dt=>{
-            const match = d.files.find(f =>
+            const match = rootFiles.find(f =>
               dt.autoKeywords.some(kw => f.name.toLowerCase().includes(kw.toLowerCase()))
             );
             if (match) autoMatched[dt.key] = match;
@@ -154,8 +245,13 @@ export default function SubmittalBuilder() {
   const set    = (f,v) => setInfo(p=>({...p,[f]:v}));
   const toggle = key => { setSelected(p=>{ const n=new Set(p); n.has(key)?n.delete(key):n.add(key); return n; }); setActivePreset(null); };
   const applyPreset = name => { setSelected(new Set(PRESETS[name])); setActivePreset(name); };
-  const openLibrary = useCallback(docKey => { setLibraryTarget(docKey); setLibraryOpen(true); }, []);
-  const pickFile    = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); }, [libraryTarget]);
+  const openLibrary = useCallback(docKey => {
+    const docDef = DOC_TYPES.find(d=>d.key===docKey);
+    setLibraryTarget(docKey);
+    setLibraryStartFolder(docDef?.defaultFolder || null);
+    setLibraryOpen(true);
+  }, []);
+  const pickFile    = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); setLibraryStartFolder(null); }, [libraryTarget]);
 
   const [merging, setMerging]   = useState(false);
   const [mergeError, setMergeError] = useState("");
@@ -217,7 +313,7 @@ export default function SubmittalBuilder() {
   return (
     <div style={{ background:C.bg, minHeight:"100vh", fontFamily:FF, color:C.text }}>
 
-      {libraryOpen && <LibraryModal allFiles={allFiles} loading={libLoading} error={libError} onPick={pickFile} onClose={()=>{ setLibraryOpen(false); setLibraryTarget(null); }}/>}
+      {libraryOpen && <LibraryModal libraryUrl={LIBRARY_WEBHOOK_URL} startFolder={libraryStartFolder} fallbackFiles={allFiles} fallbackError={libError} onPick={pickFile} onClose={()=>{ setLibraryOpen(false); setLibraryTarget(null); setLibraryStartFolder(null); }}/>}
 
       {/* TOPBAR */}
       <div style={{ borderBottom:`1px solid ${C.border}`, padding:"14px 28px", display:"flex", alignItems:"center", gap:20 }}>
