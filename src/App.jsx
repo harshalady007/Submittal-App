@@ -286,8 +286,11 @@ export default function SubmittalBuilder() {
       setMergeStatus("Merging PDFs…");
       const sleep = (ms) => new Promise(r=>setTimeout(r, ms));
       const maxAttempts = 90; // ~6 minutes max
-      let pdfBase64 = null;
-      let filename  = outputName + ".pdf";
+
+      // ── CHANGED: track mergedUrl instead of pdfBase64 ──────────────────────
+      let finalUrl = null;
+      let filename = outputName + ".pdf";
+
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         await sleep(attempt <= 3 ? 2500 : 4000);
         const pollRes = await fetch(MERGE_FETCH_URL, {
@@ -295,27 +298,33 @@ export default function SubmittalBuilder() {
           body: JSON.stringify({ jobId, mergedUrl, pdfcoKey: PDFCO_KEY, outputName, fileCount })
         });
         if (!pollRes.ok) {
-          // transient — keep polling unless it persists
           if (attempt > 5) throw new Error(`Merge fetch failed: ${pollRes.status}`);
           continue;
         }
         const pollData = await pollRes.json();
         if (pollData.error) throw new Error(pollData.message || "Merge job failed");
-        if (pollData.ready && pollData.pdfBase64) {
-          pdfBase64 = pollData.pdfBase64;
-          filename  = pollData.filename || filename;
+
+        // ── CHANGED: check mergedUrl (not pdfBase64) ───────────────────────
+        if (pollData.ready && pollData.mergedUrl) {
+          finalUrl = pollData.mergedUrl;
+          filename = pollData.filename || filename;
           setMergeStatus("Downloading…");
           break;
         }
         setMergeStatus(`Merging PDFs… (${attempt * 4}s)`);
       }
-      if (!pdfBase64) throw new Error("Merge timed out — try again or split into fewer documents");
 
-      const blob = new Blob([Uint8Array.from(atob(pdfBase64), c=>c.charCodeAt(0))], { type:"application/pdf" });
-      const url = URL.createObjectURL(blob);
+      if (!finalUrl) throw new Error("Merge timed out — try again or split into fewer documents");
+
+      // ── CHANGED: direct URL download (no base64 blob decode) ──────────────
       const a = document.createElement("a");
-      a.href = url; a.download = filename; a.click();
-      URL.revokeObjectURL(url);
+      a.href = finalUrl;
+      a.download = filename;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
       setMergeStatus("");
     } catch(e) { setMergeError(e.message); setMergeStatus(""); }
     finally { setMerging(false); }
