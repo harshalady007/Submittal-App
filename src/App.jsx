@@ -285,7 +285,7 @@ export default function SubmittalBuilder() {
       // Phase 2: poll fetch endpoint until ready
       setMergeStatus("Merging PDFs…");
       const sleep = (ms) => new Promise(r=>setTimeout(r, ms));
-      const maxAttempts = 90; // ~6 minutes max
+      const maxAttempts = 150; // ~6 minutes max
 
       // ── CHANGED: track mergedUrl instead of pdfBase64 ──────────────────────
       let finalUrl = null;
