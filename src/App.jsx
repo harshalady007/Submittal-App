@@ -52,6 +52,29 @@ const btnP = { background:C.accent, color:"#000", border:"none", borderRadius:6,
 const btnG = { background:"transparent", color:C.text, border:`1px solid ${C.border}`, borderRadius:6, padding:"10px 18px", fontSize:13, cursor:"pointer", fontFamily:FF };
 const lbl  = { color:C.textDim, fontSize:11, fontWeight:700, letterSpacing:"0.09em", textTransform:"uppercase", marginBottom:6, display:"block" };
 
+const toArray = value => Array.isArray(value) ? value : [];
+const normalizeDriveName = value => (value || "").toLowerCase().replace(/[_-]+/g, " ");
+const makeLibraryUrl = (libraryUrl, folderId) => {
+  const sep = libraryUrl.includes("?") ? "&" : "?";
+  return folderId ? libraryUrl + sep + "folder=" + encodeURIComponent(folderId) : libraryUrl;
+};
+const normalizeLibraryResponse = data => ({
+  files: toArray(Array.isArray(data) ? data : data?.files),
+  folders: toArray(data?.folders),
+});
+const findAutoMatches = files => {
+  const autoMatched = {};
+  DOC_TYPES.filter(dt=>dt.manual && dt.autoKeywords).forEach(dt=>{
+    const keywords = [dt.label, ...(dt.autoKeywords || [])].map(normalizeDriveName);
+    const match = files.find(f => {
+      const fileName = normalizeDriveName(f.name);
+      return keywords.some(kw => kw && fileName.includes(kw));
+    });
+    if (match) autoMatched[dt.key] = match;
+  });
+  return autoMatched;
+};
+
 // ── LIBRARY MODAL ──────────────────────────────────────────────────────────────
 function LibraryModal({ libraryUrl, startFolder, fallbackFiles, fallbackError, onPick, onClose }) {
   const [search, setSearch]   = useState("");
@@ -69,13 +92,12 @@ function LibraryModal({ libraryUrl, startFolder, fallbackFiles, fallbackError, o
       return;
     }
     setLoading(true); setError("");
-    const sep = libraryUrl.includes("?") ? "&" : "?";
-    const url = folderId ? libraryUrl + sep + "folder=" + encodeURIComponent(folderId) : libraryUrl;
-    fetch(url)
+    fetch(makeLibraryUrl(libraryUrl, folderId))
       .then(r => r.json())
       .then(d => {
-        setFolders(d.folders || []);
-        setFiles(d.files || []);
+        const { files: nextFiles, folders: nextFolders } = normalizeLibraryResponse(d);
+        setFolders(nextFolders);
+        setFiles(nextFiles);
         if (breadcrumb) setStack(breadcrumb);
         setSearch("");
       })
@@ -221,22 +243,44 @@ export default function SubmittalBuilder() {
     setLibLoading(true);
     fetch(LIBRARY_WEBHOOK_URL)
       .then(r=>r.json())
-      .then(d=>{
-        // backward-compat: old shape was {files:[...]}, new shape is {files,folders,...}
-        const rootFiles = d.files || [];
-        if (rootFiles.length) {
-          setAllFiles(rootFiles);
-          // Auto-match files to doc slots by keyword
-          const autoMatched = {};
-          DOC_TYPES.filter(dt=>dt.manual && dt.autoKeywords).forEach(dt=>{
-            const match = rootFiles.find(f =>
-              dt.autoKeywords.some(kw => f.name.toLowerCase().includes(kw.toLowerCase()))
-            );
-            if (match) autoMatched[dt.key] = match;
-          });
-          if (Object.keys(autoMatched).length > 0) {
-            setManualFiles(prev=>({ ...autoMatched, ...prev }));
-          }
+      .then(async d=>{
+        const seenFolders = new Set();
+        const seenFiles = new Set();
+        const filesById = new Map();
+        const addFiles = files => files.forEach(file => {
+          const key = file.id || file.webViewLink || file.name;
+          if (!key || seenFiles.has(key)) return;
+          seenFiles.add(key);
+          filesById.set(key, file);
+        });
+
+        const root = normalizeLibraryResponse(d);
+        addFiles(root.files);
+        const knownFolderIds = [DRIVE_ROOT_FOLDER, ...DOC_TYPES.map(dt=>dt.defaultFolder).filter(Boolean)];
+        const knownFolders = knownFolderIds
+          .filter(id => !root.folders.some(folder => folder.id === id))
+          .map(id => ({ id, name: "Known Drive Folder" }));
+        let queue = [...root.folders, ...knownFolders];
+
+        // The library webhook can return folders at the root. Walk those folders so
+        // manual Drive documents are auto-detected even when they are organized in
+        // subfolders instead of sitting directly at the root.
+        for (let i = 0; i < queue.length && i < 75; i++) {
+          const folder = queue[i];
+          if (!folder?.id || seenFolders.has(folder.id)) continue;
+          seenFolders.add(folder.id);
+          const res = await fetch(makeLibraryUrl(LIBRARY_WEBHOOK_URL, folder.id));
+          if (!res.ok) continue;
+          const nested = normalizeLibraryResponse(await res.json());
+          addFiles(nested.files);
+          queue = queue.concat(nested.folders.filter(child => child?.id && !seenFolders.has(child.id)));
+        }
+
+        const libraryFiles = [...filesById.values()];
+        setAllFiles(libraryFiles);
+        const autoMatched = findAutoMatches(libraryFiles);
+        if (Object.keys(autoMatched).length > 0) {
+          setManualFiles(prev=>({ ...autoMatched, ...prev }));
         }
       })
       .catch(e=>setLibError(e.message))
