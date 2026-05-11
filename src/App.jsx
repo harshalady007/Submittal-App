@@ -14,7 +14,7 @@ const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS"; // 7. Mater
 
 // ── DATA ───────────────────────────────────────────────────────────────────────
 const DOC_TYPES = [
-  { key:"cover",             label:"Cover Page",                      icon:"📄", aiGenerated:false, manual:false, description:"Submittal cover with project details" },
+  { key:"cover",             label:"Cover Page",                      icon:"📄", aiGenerated:true,  manual:false, templateName:"Front Page", description:"Custom Front Page template with project details" },
   { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications" },
   { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms" },
   { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin" },
@@ -195,14 +195,15 @@ function LibraryModal({ libraryUrl, startFolder, fallbackFiles, fallbackError, o
 export default function SubmittalBuilder() {
   const [step, setStep]               = useState(1);
   const [info, setInfo]               = useState({
-    projectName:"", client:"", mainContractor:"", consultant:"", location:"",
-    productName:"", supplier:"",
+    projectName:"", client:"", mainContractor:"", subContractor:"", consultant:"", location:"",
+    quoteNo:"", productName:"", supplier:"",
     materialSpec:"", dimensions:"", material:"", finish:"",
     productWarranty:"", productList:"",
     date:new Date().toISOString().split("T")[0],
     additionalInfo:""
   });
-  const [selected, setSelected]       = useState(new Set(["cover","tds","warranty"]));
+  const [selectedOrder, setSelectedOrder] = useState(["cover","tds","warranty"]);
+  const selected = new Set(selectedOrder);
   const [generated, setGenerated]     = useState({});
   const [manualFiles, setManualFiles] = useState({});
   const [loading, setLoading]         = useState(false);
@@ -244,8 +245,23 @@ export default function SubmittalBuilder() {
   }, []);
 
   const set    = (f,v) => setInfo(p=>({...p,[f]:v}));
-  const toggle = key => { setSelected(p=>{ const n=new Set(p); n.has(key)?n.delete(key):n.add(key); return n; }); setActivePreset(null); };
-  const applyPreset = name => { setSelected(new Set(PRESETS[name])); setActivePreset(name); };
+  const toggle = key => {
+    setSelectedOrder(p => p.includes(key) ? p.filter(k => k !== key) : [...p, key]);
+    setActivePreset(null);
+  };
+  const applyPreset = name => { setSelectedOrder([...PRESETS[name]]); setActivePreset(name); };
+  const moveSelectedDoc = (key, direction) => {
+    setSelectedOrder(p => {
+      const index = p.indexOf(key);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= p.length) return p;
+      const n = [...p];
+      [n[index], n[nextIndex]] = [n[nextIndex], n[index]];
+      return n;
+    });
+    setActivePreset(null);
+  };
+  const selectedDocsInOrder = selectedOrder.map(key => DOC_TYPES.find(d => d.key === key)).filter(Boolean);
   const openLibrary = useCallback(docKey => {
     const docDef = DOC_TYPES.find(d=>d.key===docKey);
     setLibraryTarget(docKey);
@@ -263,19 +279,27 @@ export default function SubmittalBuilder() {
     if (!MERGE_FETCH_URL) { setMergeError("VITE_N8N_MERGE_FETCH_URL not set"); return; }
     setMerging(true); setMergeError(""); setMergeStatus("Preparing files…");
     try {
-      const filledDocs = DOC_TYPES
-        .filter(d => d.aiGenerated && selected.has(d.key) && generated[d.key])
-        .map(d => ({ docKey: d.key, viewLink: generated[d.key].viewLink }));
-      const driveFileIds = DOC_TYPES
-        .filter(d => d.manual && selected.has(d.key) && manualFiles[d.key])
-        .map(d => ({ docKey: d.key, fileId: manualFiles[d.key].id }));
+      const mergeDocsInOrder = selectedOrder.map(key => DOC_TYPES.find(d => d.key === key)).filter(Boolean);
+      const filledDocs = mergeDocsInOrder
+        .map((d, index) => d.aiGenerated && generated[d.key] ? { docKey: d.key, viewLink: generated[d.key].viewLink, order: index } : null)
+        .filter(Boolean);
+      const driveFileIds = mergeDocsInOrder
+        .map((d, index) => d.manual && manualFiles[d.key] ? { docKey: d.key, fileId: manualFiles[d.key].id, order: index } : null)
+        .filter(Boolean);
+      const orderedDocs = mergeDocsInOrder
+        .map((d, index) => {
+          if (d.aiGenerated && generated[d.key]) return { docKey: d.key, type: "filled", viewLink: generated[d.key].viewLink, order: index };
+          if (d.manual && manualFiles[d.key]) return { docKey: d.key, type: "drive", fileId: manualFiles[d.key].id, order: index };
+          return null;
+        })
+        .filter(Boolean);
       const outputName = (info.projectName || "Submittal").replace(/[^a-zA-Z0-9_-]/g,"_") + "_Submittal";
 
       // Phase 1: kick off async merge
       setMergeStatus("Uploading documents…");
       const startRes = await fetch(MERGE_URL, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ filledDocs, driveFileIds, outputName, pdfcoKey: PDFCO_KEY })
+        body: JSON.stringify({ filledDocs, driveFileIds, orderedDocs, outputName, pdfcoKey: PDFCO_KEY })
       });
       if (!startRes.ok) throw new Error(`Merge start failed: ${startRes.status}`);
       const startData = await startRes.json();
@@ -340,14 +364,14 @@ export default function SubmittalBuilder() {
       const res = await fetch(url, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ projectInfo: info, selectedDocs:[...selected] })
+        body:JSON.stringify({ projectInfo: info, placeholders: { SUB_CONTRACTOR: info.subContractor, QUOTE: info.quoteNo }, selectedDocs:selectedOrder, selectedDocDetails:selectedDocsInOrder.map(({ key, label, templateName }) => ({ key, label, templateName })) })
       });
       if (!res.ok) throw new Error(`n8n returned ${res.status}`);
       const data = await res.json();
       if (data.success && data.documents) {
         setGenerated(data.documents); setStep(4);
-        const firstAi = DOC_TYPES.find(d=>d.aiGenerated&&selected.has(d.key));
-        setActiveDoc(firstAi?.key||"cover");
+        const firstReady = selectedDocsInOrder.find(d=>d.aiGenerated || d.manual || d.key==="cover");
+        setActiveDoc(firstReady?.key||selectedOrder[0]||"cover");
       } else throw new Error("Unexpected response from n8n");
     } catch(e) { setError(e.message); setStep(2); }
     finally { setLoading(false); }
@@ -389,7 +413,7 @@ export default function SubmittalBuilder() {
               {libLoading ? "Loading Drive…" : `📁 ${allFiles.length} Drive files`}
             </div>
           )}
-          <div style={{ fontSize:12, color:C.textDim, background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"4px 12px" }}>{selected.size} docs</div>
+          <div style={{ fontSize:12, color:C.textDim, background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"4px 12px" }}>{selectedOrder.length} docs</div>
         </div>
       </div>
 
@@ -412,9 +436,11 @@ export default function SubmittalBuilder() {
                   { f:"projectName",    l:"Project Name *",         p:"e.g. Marina Bay Landscaping Phase 2", span:true },
                   { f:"client",         l:"Client *",               p:"e.g. Al Futtaim Group" },
                   { f:"mainContractor", l:"Main Contractor",        p:"e.g. Al Futtaim Construction LLC" },
+                  { f:"subContractor",  l:"Subcontractor",          p:"e.g. Bluestream Trading LLC" },
                   { f:"consultant",     l:"Consultant",             p:"e.g. Atkins Middle East (optional)" },
                   { f:"location",       l:"Project Location",       p:"e.g. Dubai, UAE" },
                   { f:"date",           l:"Submittal Date",         p:"", type:"date" },
+                  { f:"quoteNo",        l:"Quotation No",           p:"e.g. QTN-2026-001" },
                 ].map(({ f,l,p,span,type })=>(
                   <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
                     <label style={lbl}>{l}</label>
@@ -493,6 +519,24 @@ export default function SubmittalBuilder() {
               </div>
             </div>
 
+            {selectedOrder.length > 0 && (
+              <div style={{ marginBottom:20, padding:"12px 14px", background:C.card, border:`1px solid ${C.border}`, borderRadius:8 }}>
+                <label style={lbl}>Download Sequence</label>
+                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                  {selectedDocsInOrder.map((doc, idx)=>(
+                    <div key={doc.key} style={{ display:"flex", alignItems:"center", gap:8, background:"#0a111e", border:`1px solid ${C.border}`, borderRadius:6, padding:"7px 9px" }}>
+                      <span style={{ width:22, height:22, borderRadius:4, background:C.accent, color:"#000", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800 }}>{idx+1}</span>
+                      <span style={{ fontSize:16 }}>{doc.icon}</span>
+                      <span style={{ flex:1, color:C.textBright, fontSize:12, fontWeight:600 }}>{doc.label}</span>
+                      <button type="button" onClick={()=>moveSelectedDoc(doc.key, -1)} disabled={idx===0} style={{ ...btnG, padding:"3px 8px", fontSize:11, opacity:idx===0?0.35:1 }}>↑</button>
+                      <button type="button" onClick={()=>moveSelectedDoc(doc.key, 1)} disabled={idx===selectedOrder.length-1} style={{ ...btnG, padding:"3px 8px", fontSize:11, opacity:idx===selectedOrder.length-1?0.35:1 }}>↓</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop:8, color:C.textDim, fontSize:11 }}>Use the arrows to match the exact order you want in the merged PDF.</div>
+              </div>
+            )}
+
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
               {DOC_TYPES.map(doc=>{
                 const on = selected.has(doc.key);
@@ -537,14 +581,14 @@ export default function SubmittalBuilder() {
             </div>
 
             <div style={{ padding:"12px 16px", background:`${C.blue}0d`, border:`1px solid ${C.blue}1a`, borderRadius:8, fontSize:13, color:C.textDim, display:"flex", gap:20 }}>
-              <span><strong style={{ color:C.blue }}>{DOC_TYPES.filter(d=>d.aiGenerated&&selected.has(d.key)).length}</strong> Gemini</span>
-              <span><strong style={{ color:C.purple }}>{DOC_TYPES.filter(d=>d.manual&&selected.has(d.key)).length}</strong> Drive PDFs ({Object.keys(manualFiles).length} assigned)</span>
-              <span><strong style={{ color:C.accent }}>{selected.size}</strong> total</span>
+              <span><strong style={{ color:C.blue }}>{selectedDocsInOrder.filter(d=>d.aiGenerated).length}</strong> Gemini</span>
+              <span><strong style={{ color:C.purple }}>{selectedDocsInOrder.filter(d=>d.manual).length}</strong> Drive PDFs ({Object.keys(manualFiles).length} assigned)</span>
+              <span><strong style={{ color:C.accent }}>{selectedOrder.length}</strong> total</span>
             </div>
 
             <div style={{ marginTop:24, display:"flex", justifyContent:"space-between" }}>
               <button onClick={()=>setStep(1)} style={btnG}>← Back</button>
-              <button onClick={handleGenerate} disabled={selected.size===0} style={{ ...btnP, opacity:selected.size>0?1:0.35 }}>
+              <button onClick={handleGenerate} disabled={selectedOrder.length===0} style={{ ...btnP, opacity:selectedOrder.length>0?1:0.35 }}>
                 Generate Submittal →
               </button>
             </div>
@@ -559,7 +603,7 @@ export default function SubmittalBuilder() {
             <h2 style={{ color:C.textBright, fontSize:22, fontWeight:700, margin:"0 0 12px" }}>Filling Your Documents</h2>
             <p style={{ color:C.textDim, fontSize:14, maxWidth:400, margin:"0 auto" }}>n8n copying templates and filling placeholders. ~15–30 seconds.</p>
             <div style={{ marginTop:32, display:"flex", justifyContent:"center", gap:8 }}>
-              {DOC_TYPES.filter(d=>d.aiGenerated&&selected.has(d.key)).map((doc,i)=>(
+              {selectedDocsInOrder.filter(d=>d.aiGenerated).map((doc,i)=>(
                 <div key={doc.key} style={{ fontSize:22, animation:`pulse 1.5s ease-in-out ${i*0.2}s infinite` }} title={doc.label}>{doc.icon}</div>
               ))}
             </div>
@@ -572,7 +616,7 @@ export default function SubmittalBuilder() {
             <div style={{ marginBottom:18, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <h2 style={{ color:C.textBright, fontSize:20, fontWeight:700, margin:"0 0 4px" }}>Preview & Export</h2>
-                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled</p>
+                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selectedOrder.length} documents assembled</p>
               </div>
               <button onClick={handleMerge} disabled={merging} style={{ ...btnP, display:"flex", alignItems:"center", gap:7, opacity:merging?0.6:1 }}>
                 {merging ? `⏳ ${mergeStatus || "Working…"}` : "📦 Download Merged PDF"}
@@ -581,7 +625,7 @@ export default function SubmittalBuilder() {
 
             <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:16 }}>
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                {DOC_TYPES.filter(d=>selected.has(d.key)).map((doc,idx)=>{
+                {selectedDocsInOrder.map((doc,idx)=>{
                   const ok = doc.key==="cover"||(doc.aiGenerated&&!!generated[doc.key])||(doc.manual&&!!manualFiles[doc.key]);
                   const active = activeDoc===doc.key;
                   return (
@@ -590,10 +634,9 @@ export default function SubmittalBuilder() {
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ color:active?C.accent:C.text, fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doc.label}</div>
                         <div style={{ fontSize:11, marginTop:2, color:ok?C.green:C.textDim }}>
-                          {doc.key==="cover"?"✓ auto"
-                            :doc.aiGenerated?(generated[doc.key]
+                          {doc.aiGenerated?(generated[doc.key]
                               ? <><a href={generated[doc.key].viewLink} target="_blank" rel="noreferrer" style={{ color:C.blue, fontSize:11 }}>View</a> · <a href={generated[doc.key].downloadLink} style={{ color:C.green, fontSize:11 }}>Download</a></>
-                              : "⚠ not filled")
+                              : doc.key==="cover" ? "✓ preview" : "⚠ not filled")
                             :doc.manual?(manualFiles[doc.key]?"✓ "+manualFiles[doc.key].name.slice(0,16)+"…":"● no file")
                             :"✓"}
                         </div>
@@ -619,7 +662,7 @@ export default function SubmittalBuilder() {
                         <span style={{ fontSize:11, color:C.textDim }}>{info.projectName}</span>
                       </div>
                       <div style={{ flex:1, padding:"24px", overflowY:"auto", maxHeight:480 }}>
-                        {activeDoc==="cover" ? (
+                        {activeDoc==="cover" && !docResult ? (
                           <div style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"48px 32px", textAlign:"center" }}>
                             <div style={{ fontSize:11, letterSpacing:"0.18em", color:C.textDim, marginBottom:16 }}>MATERIAL SUBMITTAL</div>
                             <div style={{ fontSize:24, fontWeight:800, color:C.textBright, marginBottom:6 }}>{info.projectName||"[Project Name]"}</div>
@@ -628,9 +671,11 @@ export default function SubmittalBuilder() {
                               {[
                                 ["Client",info.client],
                                 ["Main Contractor",info.mainContractor||"—"],
+                                ["Subcontractor",info.subContractor||"—"],
                                 ["Consultant",info.consultant||"—"],
                                 ["Supplier",info.supplier||"—"],
                                 ["Location",info.location||"—"],
+                                ["Quotation No",info.quoteNo||"—"],
                                 ["Date",info.date]
                               ].map(([k,v])=>(
                                 <div key={k} style={{ display:"flex", gap:16, marginBottom:10, fontSize:13 }}>
