@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 // ── CONFIG ─────────────────────────────────────────────────────────────────────
 const WEBHOOK_URL         = import.meta.env.VITE_N8N_WEBHOOK_URL         || "";
 const LIBRARY_WEBHOOK_URL = import.meta.env.VITE_N8N_LIBRARY_WEBHOOK_URL || "";
+const SEARCH_URL          = import.meta.env.VITE_N8N_SEARCH_URL          || "";
 const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
 const MERGE_FETCH_URL     = import.meta.env.VITE_N8N_MERGE_FETCH_URL     || "";
@@ -181,22 +182,48 @@ export default function SubmittalBuilder() {
   const [allFiles, setAllFiles]       = useState([]);
   const [libLoading, setLibLoading]   = useState(false);
   const [libError, setLibError]       = useState("");
+  const [autoMatchCount, setAutoMatchCount] = useState(0);
 
+  // Auto-match Drive files for manual doc types via search webhook.
+  // Also keep a root file listing for LibraryModal's fallback display.
   useEffect(() => {
-    if (!LIBRARY_WEBHOOK_URL) return;
+    // Background: fetch root files just for LibraryModal fallback list
+    if (LIBRARY_WEBHOOK_URL) {
+      fetch(LIBRARY_WEBHOOK_URL)
+        .then(r=>r.json())
+        .then(d=>setAllFiles(d.files || []))
+        .catch(()=>{});
+    }
+
+    // Foreground: run keyword search across whole Drive
+    if (!SEARCH_URL) return;
     setLibLoading(true);
-    fetch(LIBRARY_WEBHOOK_URL).then(r=>r.json()).then(d=>{
-      const rootFiles = d.files || [];
-      if (rootFiles.length) {
-        setAllFiles(rootFiles);
-        const autoMatched = {};
-        DOC_TYPES.filter(dt=>dt.manual && dt.autoKeywords).forEach(dt=>{
-          const match = rootFiles.find(f => dt.autoKeywords.some(kw => f.name.toLowerCase().includes(kw.toLowerCase())));
-          if (match) autoMatched[dt.key] = match;
-        });
-        if (Object.keys(autoMatched).length > 0) setManualFiles(prev=>({ ...autoMatched, ...prev }));
-      }
-    }).catch(e=>setLibError(e.message)).finally(()=>setLibLoading(false));
+    setLibError("");
+
+    const queries = {};
+    DOC_TYPES.filter(dt => dt.manual && dt.autoKeywords).forEach(dt => {
+      queries[dt.key] = dt.autoKeywords;
+    });
+
+    fetch(SEARCH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ queries })
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.success && d.matches) {
+          const autoMatched = {};
+          Object.entries(d.matches).forEach(([k, file]) => {
+            if (file && file.id) autoMatched[k] = file;
+          });
+          const n = Object.keys(autoMatched).length;
+          setAutoMatchCount(n);
+          if (n > 0) setManualFiles(prev => ({ ...autoMatched, ...prev }));
+        }
+      })
+      .catch(e => setLibError(e.message || "Drive search failed"))
+      .finally(() => setLibLoading(false));
   }, []);
 
   const set    = (f,v) => setInfo(p=>({...p,[f]:v}));
@@ -326,9 +353,9 @@ export default function SubmittalBuilder() {
           })}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          {LIBRARY_WEBHOOK_URL && (
-            <div style={{ fontSize:11, color:libLoading?C.textDim:allFiles.length>0?C.green:C.textDim, background:C.card, border:`1px solid ${allFiles.length>0?C.green+"44":C.border}`, borderRadius:20, padding:"4px 12px" }}>
-              {libLoading ? "Loading Drive…" : `📁 ${allFiles.length} Drive files`}
+          {SEARCH_URL && (
+            <div style={{ fontSize:11, color:libLoading?C.textDim:autoMatchCount>0?C.green:C.textDim, background:C.card, border:`1px solid ${autoMatchCount>0?C.green+"44":C.border}`, borderRadius:20, padding:"4px 12px" }}>
+              {libLoading ? "Searching Drive…" : `🔎 ${autoMatchCount} auto-matched`}
             </div>
           )}
           <div style={{ fontSize:12, color:C.textDim, background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"4px 12px" }}>{selected.size} docs</div>
