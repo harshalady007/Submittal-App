@@ -12,21 +12,23 @@ const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs";
 const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS";
 
+// indexLabel = UPPERCASE name shown on the generated INDEX page.
+// Docs WITHOUT an indexLabel (e.g. cover) are excluded from the index list.
 const DOC_TYPES = [
   { key:"cover",             label:"Cover Page (Front Page)",         icon:"📄", aiGenerated:true,  manual:false, description:"AI-filled Front Page from Drive (project + sub-contractor)" },
-  { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications" },
-  { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms" },
-  { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin" },
-  { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration" },
-  { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:false, manual:true,  description:"Product test results & lab certificate", autoKeywords:["test certificate","test cert","test report"], defaultFolder:TEST_CERT_FOLDER },
-  { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project" },
-  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", autoKeywords:["approval","approved"] },
-  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document",                autoKeywords:["trade license","trade licence"] },
-  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product",            autoKeywords:["msds","safety data","sds"] },
-  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences",        autoKeywords:["iso","certification"] },
-  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list",           autoKeywords:["vendor","vendor list","supplier list"] },
-  { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive",         autoKeywords:["company profile","bluestream profile"] },
-  { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive",             autoKeywords:["project reference","reference list"] },
+  { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications", indexLabel:"TECHNICAL DATA SHEET" },
+  { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms", indexLabel:"DRAFT WARRANTY CERTIFICATES & GUARANTEE" },
+  { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin", indexLabel:"COUNTRY OF ORIGIN" },
+  { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration", indexLabel:"TECHNICAL COMPLIANCES" },
+  { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:false, manual:true,  description:"Product test results & lab certificate", indexLabel:"TEST REPORT", autoKeywords:["test certificate","test cert","test report"], defaultFolder:TEST_CERT_FOLDER },
+  { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project", indexLabel:"MATERIAL SCHEDULE" },
+  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", indexLabel:"PREVIOUS MATERIAL APPROVAL", autoKeywords:["approval","approved"] },
+  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document", indexLabel:"TRADE LICENSE / COMMERCIAL LICENSE", autoKeywords:["trade license","trade licence"] },
+  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product", indexLabel:"MATERIAL SAFETY DATA SHEET (MSDS)", autoKeywords:["msds","safety data","sds"] },
+  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences", indexLabel:"ISO CERTIFICATE", autoKeywords:["iso","certification"] },
+  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list", indexLabel:"VENDOR LIST", autoKeywords:["vendor","vendor list","supplier list"] },
+  { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive", indexLabel:"COMPANY PROFILE", autoKeywords:["company profile","bluestream profile"] },
+  { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive", indexLabel:"LIST OF PREVIOUS PROJECTS", autoKeywords:["project reference","reference list"] },
 ];
 
 const PRESETS = {
@@ -247,13 +249,19 @@ export default function SubmittalBuilder() {
       // Build payload in USER'S SELECTION ORDER (Set preserves insertion order)
       const filledDocs = [];
       const driveFileIds = [];
+      const indexItems = [];
       [...selected].forEach((key, idx) => {
         const d = DOC_TYPES.find(x => x.key === key);
         if (!d) return;
+        // Document content (filled or drive PDF)
         if (d.aiGenerated && generated[key]) {
           filledDocs.push({ docKey: key, viewLink: generated[key].viewLink, orderIndex: idx });
         } else if (d.manual && manualFiles[key]) {
           driveFileIds.push({ docKey: key, fileId: manualFiles[key].id, orderIndex: idx });
+        }
+        // INDEX entry — every selected doc that has an indexLabel (cover excluded)
+        if (d.indexLabel) {
+          indexItems.push({ docKey: key, label: d.indexLabel });
         }
       });
 
@@ -262,7 +270,7 @@ export default function SubmittalBuilder() {
       setMergeStatus("Uploading documents…");
       const startRes = await fetch(MERGE_URL, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ filledDocs, driveFileIds, outputName, pdfcoKey: PDFCO_KEY })
+        body: JSON.stringify({ filledDocs, driveFileIds, indexItems, outputName, pdfcoKey: PDFCO_KEY })
       });
       if (!startRes.ok) throw new Error(`Merge start failed: ${startRes.status}`);
       const startData = await startRes.json();
@@ -329,6 +337,7 @@ export default function SubmittalBuilder() {
   };
 
   const selectedInOrder = () => [...selected].map(k=>DOC_TYPES.find(d=>d.key===k)).filter(Boolean);
+  const indexCount = () => [...selected].filter(k => { const d = DOC_TYPES.find(x=>x.key===k); return d && d.indexLabel; }).length;
 
   return (
     <div style={{ background:C.bg, minHeight:"100vh", fontFamily:FF, color:C.text }}>
@@ -501,6 +510,7 @@ export default function SubmittalBuilder() {
             <div style={{ padding:"12px 16px", background:`${C.blue}0d`, border:`1px solid ${C.blue}1a`, borderRadius:8, fontSize:13, color:C.textDim, display:"flex", gap:20 }}>
               <span><strong style={{ color:C.blue }}>{DOC_TYPES.filter(d=>d.aiGenerated&&selected.has(d.key)).length}</strong> Gemini</span>
               <span><strong style={{ color:C.purple }}>{DOC_TYPES.filter(d=>d.manual&&selected.has(d.key)).length}</strong> Drive PDFs ({Object.keys(manualFiles).length} assigned)</span>
+              <span><strong style={{ color:C.green }}>{indexCount()}</strong> on INDEX page</span>
               <span><strong style={{ color:C.accent }}>{selected.size}</strong> total</span>
             </div>
 
@@ -530,7 +540,7 @@ export default function SubmittalBuilder() {
             <div style={{ marginBottom:18, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <h2 style={{ color:C.textBright, fontSize:20, fontWeight:700, margin:"0 0 4px" }}>Preview & Export</h2>
-                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled · merged in selection order</p>
+                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled · INDEX page auto-generated · merged in selection order</p>
               </div>
               <button onClick={handleMerge} disabled={merging} style={{ ...btnP, display:"flex", alignItems:"center", gap:7, opacity:merging?0.6:1 }}>
                 {merging ? `⏳ ${mergeStatus || "Working…"}` : "📦 Download Merged PDF"}
@@ -640,7 +650,11 @@ export default function SubmittalBuilder() {
               </div>
             </div>
 
-            <div style={{ marginTop:20, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+            <div style={{ marginTop:16, padding:"10px 14px", background:`${C.green}0a`, border:`1px solid ${C.green}22`, borderRadius:8, fontSize:12, color:C.textDim }}>
+              📑 An <strong style={{ color:C.green }}>INDEX page</strong> listing {indexCount()} document{indexCount()===1?"":"s"} will be auto-generated and inserted after the cover.
+            </div>
+
+            <div style={{ marginTop:16, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
               <button onClick={()=>{ setStep(2); setGenerated({}); setActiveDoc(null); }} style={btnG}>← Rebuild</button>
               <div style={{ display:"flex", gap:10, alignItems:"center" }}>
                 {mergeError && <span style={{ fontSize:12, color:"#fca5a5" }}>⚠ {mergeError}</span>}
