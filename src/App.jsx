@@ -12,8 +12,8 @@ const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs";
 const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS";
 
-// indexLabel = UPPERCASE name shown on the generated INDEX page.
-// Docs WITHOUT an indexLabel (e.g. cover) are excluded from the index list.
+// preferredFilename = exact filename (case-insensitive) — takes priority over autoKeywords
+// autoKeywords = fallback if preferredFilename is missing from Drive
 const DOC_TYPES = [
   { key:"cover",             label:"Cover Page (Front Page)",         icon:"📄", aiGenerated:true,  manual:false, description:"AI-filled Front Page from Drive (project + sub-contractor)" },
   { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications", indexLabel:"TECHNICAL DATA SHEET" },
@@ -22,13 +22,13 @@ const DOC_TYPES = [
   { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration", indexLabel:"TECHNICAL COMPLIANCES" },
   { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:false, manual:true,  description:"Pick test certificate from Drive folder", indexLabel:"TEST REPORT", defaultFolder:TEST_CERT_FOLDER },
   { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project", indexLabel:"MATERIAL SCHEDULE" },
-  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", indexLabel:"PREVIOUS MATERIAL APPROVAL", autoKeywords:["approval","approved"] },
-  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document", indexLabel:"TRADE LICENSE / COMMERCIAL LICENSE", autoKeywords:["trade license","trade licence"] },
-  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product", indexLabel:"MATERIAL SAFETY DATA SHEET (MSDS)", autoKeywords:["msds","safety data","sds"] },
-  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences", indexLabel:"ISO CERTIFICATE", autoKeywords:["iso","certification"] },
-  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list", indexLabel:"VENDOR LIST", autoKeywords:["vendor","vendor list","supplier list"] },
-  { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive", indexLabel:"COMPANY PROFILE", autoKeywords:["company profile","bluestream profile"] },
-  { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive", indexLabel:"LIST OF PREVIOUS PROJECTS", autoKeywords:["project reference","reference list"] },
+  { key:"previous_approval", label:"Previous Approval",               icon:"📝", aiGenerated:false, manual:true,  description:"Previous client or consultant approval letter", indexLabel:"PREVIOUS MATERIAL APPROVAL", preferredFilename:"PREVIOUS APPROVALS.pdf",          autoKeywords:["approval","approved"] },
+  { key:"trade_license",     label:"Trade License",                   icon:"🏢", aiGenerated:false, manual:true,  description:"Company trade license document",                indexLabel:"TRADE LICENSE / COMMERCIAL LICENSE", preferredFilename:"TRADE LICENSE.pdf",        autoKeywords:["trade license","trade licence"] },
+  { key:"msds",              label:"Material Safety Data Sheet",      icon:"⚗️", aiGenerated:false, manual:true,  description:"MSDS / safety data for the product",            indexLabel:"MATERIAL SAFETY DATA SHEET (MSDS)", preferredFilename:"10. PROJECT REFERENCE LIST.pdf", autoKeywords:["msds","safety data","sds"] },
+  { key:"iso_cert",          label:"ISO Certifications & Licenses",   icon:"🏆", aiGenerated:false, manual:true,  description:"ISO certs, quality or product licences",        indexLabel:"ISO CERTIFICATE",                   preferredFilename:"ISO Certificate.pdf",      autoKeywords:["iso certificate","iso"] },
+  { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list",           indexLabel:"VENDOR LIST",                                                                       autoKeywords:["vendor","vendor list","supplier list"] },
+  { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive",         indexLabel:"COMPANY PROFILE",                   preferredFilename:"Bluestream Company Profile.pdf", autoKeywords:["company profile","bluestream profile"] },
+  { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive",             indexLabel:"LIST OF PREVIOUS PROJECTS",         preferredFilename:"10. PROJECT REFERENCE LIST.pdf", autoKeywords:["project reference","reference list"] },
 ];
 
 const PRESETS = {
@@ -187,9 +187,8 @@ export default function SubmittalBuilder() {
   const [autoMatchCount, setAutoMatchCount] = useState(0);
 
   // Auto-match Drive files for manual doc types via search webhook.
-  // Also keep a root file listing for LibraryModal's fallback display.
+  // preferredFilename takes priority over autoKeywords (exact filename match).
   useEffect(() => {
-    // Background: fetch root files just for LibraryModal fallback list
     if (LIBRARY_WEBHOOK_URL) {
       fetch(LIBRARY_WEBHOOK_URL)
         .then(r=>r.json())
@@ -197,20 +196,21 @@ export default function SubmittalBuilder() {
         .catch(()=>{});
     }
 
-    // Foreground: run keyword search across whole Drive
     if (!SEARCH_URL) return;
     setLibLoading(true);
     setLibError("");
 
     const queries = {};
-    DOC_TYPES.filter(dt => dt.manual && dt.autoKeywords).forEach(dt => {
-      queries[dt.key] = dt.autoKeywords;
+    const preferredFilenames = {};
+    DOC_TYPES.filter(dt => dt.manual && (dt.autoKeywords || dt.preferredFilename)).forEach(dt => {
+      if (dt.autoKeywords) queries[dt.key] = dt.autoKeywords;
+      if (dt.preferredFilename) preferredFilenames[dt.key] = dt.preferredFilename;
     });
 
     fetch(SEARCH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ queries })
+      body: JSON.stringify({ queries, preferredFilenames })
     })
       .then(r => r.json())
       .then(d => {
@@ -246,20 +246,17 @@ export default function SubmittalBuilder() {
     if (!MERGE_FETCH_URL) { setMergeError("VITE_N8N_MERGE_FETCH_URL not set"); return; }
     setMerging(true); setMergeError(""); setMergeStatus("Preparing files…");
     try {
-      // Build payload in USER'S SELECTION ORDER (Set preserves insertion order)
       const filledDocs = [];
       const driveFileIds = [];
       const indexItems = [];
       [...selected].forEach((key, idx) => {
         const d = DOC_TYPES.find(x => x.key === key);
         if (!d) return;
-        // Document content (filled or drive PDF)
         if (d.aiGenerated && generated[key]) {
           filledDocs.push({ docKey: key, viewLink: generated[key].viewLink, orderIndex: idx });
         } else if (d.manual && manualFiles[key]) {
           driveFileIds.push({ docKey: key, fileId: manualFiles[key].id, orderIndex: idx });
         }
-        // INDEX entry — every selected doc that has an indexLabel (cover excluded)
         if (d.indexLabel) {
           indexItems.push({ docKey: key, label: d.indexLabel });
         }
