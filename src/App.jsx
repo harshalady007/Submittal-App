@@ -12,8 +12,13 @@ const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs";
 const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS";
 
-// preferredFilename = exact filename (case-insensitive) — takes priority over autoKeywords
-// autoKeywords = fallback if preferredFilename is missing from Drive
+// Front page PDFs prepended before TDS / Warranty in the final merged PDF.
+// Looked up by exact filename in Drive via /submittal-search.
+const FRONT_PAGE_FILES = {
+  tds:      "TECHNICAL DATA SHEET FRONT PAGE.pdf",
+  warranty: "DRAFT WARRANTY FRONT PAGE.pdf"
+};
+
 const DOC_TYPES = [
   { key:"cover",             label:"Cover Page (Front Page)",         icon:"📄", aiGenerated:true,  manual:false, description:"AI-filled Front Page from Drive (project + sub-contractor)" },
   { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications", indexLabel:"TECHNICAL DATA SHEET" },
@@ -174,6 +179,7 @@ export default function SubmittalBuilder() {
   const [selected, setSelected]       = useState(new Set(["cover","tds","warranty"]));
   const [generated, setGenerated]     = useState({});
   const [manualFiles, setManualFiles] = useState({});
+  const [frontPageFiles, setFrontPageFiles] = useState({});
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState("");
   const [activeDoc, setActiveDoc]     = useState(null);
@@ -186,8 +192,7 @@ export default function SubmittalBuilder() {
   const [libError, setLibError]       = useState("");
   const [autoMatchCount, setAutoMatchCount] = useState(0);
 
-  // Auto-match Drive files for manual doc types via search webhook.
-  // preferredFilename takes priority over autoKeywords (exact filename match).
+  // Auto-match Drive files for manual doc types + front pages for TDS/Warranty.
   useEffect(() => {
     if (LIBRARY_WEBHOOK_URL) {
       fetch(LIBRARY_WEBHOOK_URL)
@@ -202,9 +207,17 @@ export default function SubmittalBuilder() {
 
     const queries = {};
     const preferredFilenames = {};
+
     DOC_TYPES.filter(dt => dt.manual && (dt.autoKeywords || dt.preferredFilename)).forEach(dt => {
       if (dt.autoKeywords) queries[dt.key] = dt.autoKeywords;
       if (dt.preferredFilename) preferredFilenames[dt.key] = dt.preferredFilename;
+    });
+
+    // Front pages — use _fp_ prefix to separate from manualFiles in the response
+    Object.entries(FRONT_PAGE_FILES).forEach(([parentKey, filename]) => {
+      const fpKey = "_fp_" + parentKey;
+      preferredFilenames[fpKey] = filename;
+      queries[fpKey] = [filename];
     });
 
     fetch(SEARCH_URL, {
@@ -216,12 +229,19 @@ export default function SubmittalBuilder() {
       .then(d => {
         if (d && d.success && d.matches) {
           const autoMatched = {};
+          const fpMatched = {};
           Object.entries(d.matches).forEach(([k, file]) => {
-            if (file && file.id) autoMatched[k] = file;
+            if (!file || !file.id) return;
+            if (k.startsWith("_fp_")) {
+              fpMatched[k.slice(4)] = file;
+            } else {
+              autoMatched[k] = file;
+            }
           });
           const n = Object.keys(autoMatched).length;
           setAutoMatchCount(n);
           if (n > 0) setManualFiles(prev => ({ ...autoMatched, ...prev }));
+          if (Object.keys(fpMatched).length > 0) setFrontPageFiles(fpMatched);
         }
       })
       .catch(e => setLibError(e.message || "Drive search failed"))
@@ -249,14 +269,30 @@ export default function SubmittalBuilder() {
       const filledDocs = [];
       const driveFileIds = [];
       const indexItems = [];
+
+      // Multiply selection index by 10 so a front-page slot can sit just before each AI doc
       [...selected].forEach((key, idx) => {
         const d = DOC_TYPES.find(x => x.key === key);
         if (!d) return;
-        if (d.aiGenerated && generated[key]) {
-          filledDocs.push({ docKey: key, viewLink: generated[key].viewLink, orderIndex: idx });
-        } else if (d.manual && manualFiles[key]) {
-          driveFileIds.push({ docKey: key, fileId: manualFiles[key].id, orderIndex: idx });
+        const baseOrder = idx * 10;
+        let mainOrder = baseOrder;
+
+        // Prepend front page for AI docs (TDS, Warranty) if Drive has the file
+        if (d.aiGenerated && generated[key] && frontPageFiles[key]) {
+          driveFileIds.push({
+            docKey: key + "_frontpage",
+            fileId: frontPageFiles[key].id,
+            orderIndex: baseOrder
+          });
+          mainOrder = baseOrder + 1;
         }
+
+        if (d.aiGenerated && generated[key]) {
+          filledDocs.push({ docKey: key, viewLink: generated[key].viewLink, orderIndex: mainOrder });
+        } else if (d.manual && manualFiles[key]) {
+          driveFileIds.push({ docKey: key, fileId: manualFiles[key].id, orderIndex: mainOrder });
+        }
+
         if (d.indexLabel) {
           indexItems.push({ docKey: key, label: d.indexLabel });
         }
@@ -335,6 +371,7 @@ export default function SubmittalBuilder() {
 
   const selectedInOrder = () => [...selected].map(k=>DOC_TYPES.find(d=>d.key===k)).filter(Boolean);
   const indexCount = () => [...selected].filter(k => { const d = DOC_TYPES.find(x=>x.key===k); return d && d.indexLabel; }).length;
+  const frontPagesUsed = () => [...selected].filter(k => frontPageFiles[k] && generated[k]).length;
 
   return (
     <div style={{ background:C.bg, minHeight:"100vh", fontFamily:FF, color:C.text }}>
@@ -451,7 +488,8 @@ export default function SubmittalBuilder() {
               <p style={{ color:C.textDim, margin:0, fontSize:13 }}>
                 <span style={{ color:C.blue, fontWeight:600 }}>AI</span> items → Gemini generates &nbsp;·&nbsp;
                 <span style={{ color:C.purple, fontWeight:600 }}>DRIVE</span> items → pick from library &nbsp;·&nbsp;
-                <span style={{ color:C.accent, fontWeight:600 }}>Selection order = page order</span> in final PDF
+                <span style={{ color:C.green, fontWeight:600 }}>FP</span> = front page auto-prepended &nbsp;·&nbsp;
+                <span style={{ color:C.accent, fontWeight:600 }}>Selection order = page order</span>
               </p>
             </div>
 
@@ -468,6 +506,7 @@ export default function SubmittalBuilder() {
               {DOC_TYPES.map(doc=>{
                 const on = selected.has(doc.key);
                 const assigned = doc.manual && manualFiles[doc.key];
+                const hasFp = !!frontPageFiles[doc.key];
                 const orderPos = on ? [...selected].indexOf(doc.key) + 1 : null;
                 return (
                   <div key={doc.key} style={{ background:on?`${C.accent}0e`:C.card, border:`1px solid ${on?C.accent:C.border}`, borderRadius:8, overflow:"hidden" }}>
@@ -478,6 +517,7 @@ export default function SubmittalBuilder() {
                         <div style={{ color:on?C.textBright:C.text, fontWeight:600, fontSize:13 }}>{doc.label}</div>
                         <div style={{ color:C.textDim, fontSize:11, marginTop:2 }}>{doc.description}</div>
                       </div>
+                      {hasFp && <div title="Front page detected" style={{ flexShrink:0, background:`${C.green}18`, border:`1px solid ${C.green}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.green }}>FP</div>}
                       {doc.aiGenerated && <div style={{ flexShrink:0, background:`${C.blue}18`, border:`1px solid ${C.blue}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.blue }}>AI</div>}
                       {doc.manual && <div style={{ flexShrink:0, background:`${C.purple}18`, border:`1px solid ${C.purple}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.purple }}>DRIVE</div>}
                     </div>
@@ -499,15 +539,22 @@ export default function SubmittalBuilder() {
                         )}
                       </div>
                     )}
+
+                    {on && hasFp && (
+                      <div style={{ borderTop:`1px solid ${C.border}`, padding:"6px 14px", fontSize:11, color:C.green, background:`${C.green}06` }}>
+                        📄 Front page will be prepended: <strong>{frontPageFiles[doc.key].name}</strong>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            <div style={{ padding:"12px 16px", background:`${C.blue}0d`, border:`1px solid ${C.blue}1a`, borderRadius:8, fontSize:13, color:C.textDim, display:"flex", gap:20 }}>
+            <div style={{ padding:"12px 16px", background:`${C.blue}0d`, border:`1px solid ${C.blue}1a`, borderRadius:8, fontSize:13, color:C.textDim, display:"flex", gap:20, flexWrap:"wrap" }}>
               <span><strong style={{ color:C.blue }}>{DOC_TYPES.filter(d=>d.aiGenerated&&selected.has(d.key)).length}</strong> Gemini</span>
               <span><strong style={{ color:C.purple }}>{DOC_TYPES.filter(d=>d.manual&&selected.has(d.key)).length}</strong> Drive PDFs ({Object.keys(manualFiles).length} assigned)</span>
-              <span><strong style={{ color:C.green }}>{indexCount()}</strong> on INDEX page</span>
+              <span><strong style={{ color:C.green }}>{indexCount()}</strong> on INDEX</span>
+              <span><strong style={{ color:C.green }}>{[...selected].filter(k => frontPageFiles[k]).length}</strong> front pages</span>
               <span><strong style={{ color:C.accent }}>{selected.size}</strong> total</span>
             </div>
 
@@ -537,7 +584,7 @@ export default function SubmittalBuilder() {
             <div style={{ marginBottom:18, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <h2 style={{ color:C.textBright, fontSize:20, fontWeight:700, margin:"0 0 4px" }}>Preview & Export</h2>
-                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} documents assembled · INDEX page auto-generated · merged in selection order</p>
+                <p style={{ color:C.textDim, margin:0, fontSize:13 }}>{selected.size} docs · INDEX page auto-generated · {frontPagesUsed()} front page{frontPagesUsed()===1?"":"s"} prepended</p>
               </div>
               <button onClick={handleMerge} disabled={merging} style={{ ...btnP, display:"flex", alignItems:"center", gap:7, opacity:merging?0.6:1 }}>
                 {merging ? `⏳ ${mergeStatus || "Working…"}` : "📦 Download Merged PDF"}
@@ -549,11 +596,15 @@ export default function SubmittalBuilder() {
                 {selectedInOrder().map((doc,idx)=>{
                   const ok = (doc.aiGenerated && !!generated[doc.key]) || (doc.manual && !!manualFiles[doc.key]);
                   const active = activeDoc===doc.key;
+                  const hasFp = !!frontPageFiles[doc.key];
                   return (
                     <div key={doc.key} onClick={()=>setActiveDoc(doc.key)} style={{ background:active?`${C.accent}15`:C.card, border:`1px solid ${active?C.accent:C.border}`, borderRadius:7, padding:"10px 12px", cursor:"pointer", display:"flex", alignItems:"center", gap:10 }}>
                       <div style={{ width:22, height:22, borderRadius:4, flexShrink:0, background:active?C.accent:C.border, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:active?"#000":C.textDim }}>{idx+1}</div>
                       <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ color:active?C.accent:C.text, fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doc.label}</div>
+                        <div style={{ color:active?C.accent:C.text, fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {hasFp && <span style={{ color:C.green, marginRight:4 }} title="Front page prepended">FP·</span>}
+                          {doc.label}
+                        </div>
                         <div style={{ fontSize:11, marginTop:2, color:ok?C.green:C.textDim }}>
                           {doc.aiGenerated?(generated[doc.key]
                             ? <><a href={generated[doc.key].viewLink} target="_blank" rel="noreferrer" style={{ color:C.blue, fontSize:11 }}>View</a> · <a href={generated[doc.key].downloadLink} style={{ color:C.green, fontSize:11 }}>Download</a></>
@@ -572,6 +623,7 @@ export default function SubmittalBuilder() {
                   const doc = DOC_TYPES.find(d=>d.key===activeDoc);
                   const docResult = generated[activeDoc];
                   const driveFile = manualFiles[activeDoc];
+                  const fpFile = frontPageFiles[activeDoc];
                   return (
                     <>
                       <div style={{ padding:"13px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
@@ -579,6 +631,7 @@ export default function SubmittalBuilder() {
                         <span style={{ color:C.textBright, fontWeight:600, fontSize:14 }}>{doc.label}</span>
                         {doc.aiGenerated && <span style={{ fontSize:10, background:`${C.blue}18`, color:C.blue, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.blue}33`, fontWeight:700 }}>TEMPLATE FILLED</span>}
                         {doc.manual && <span style={{ fontSize:10, background:`${C.purple}18`, color:C.purple, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.purple}33`, fontWeight:700 }}>DRIVE PDF</span>}
+                        {fpFile && <span style={{ fontSize:10, background:`${C.green}18`, color:C.green, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.green}33`, fontWeight:700 }}>FRONT PAGE</span>}
                         <div style={{ flex:1 }}/>
                         <span style={{ fontSize:11, color:C.textDim }}>{info.projectName}</span>
                       </div>
@@ -588,6 +641,11 @@ export default function SubmittalBuilder() {
                             <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
                             <div style={{ fontWeight:700, fontSize:16, color:C.textBright, marginBottom:8 }}>{doc.label} — Filled</div>
                             <div style={{ fontSize:13, color:C.textDim, marginBottom:28 }}>Template filled and saved to Google Drive</div>
+                            {fpFile && (
+                              <div style={{ marginBottom:24, padding:"10px 14px", background:`${C.green}10`, border:`1px solid ${C.green}33`, borderRadius:6, fontSize:12, color:C.green, display:"inline-block" }}>
+                                📄 Front page will be prepended: <strong>{fpFile.name}</strong>
+                              </div>
+                            )}
                             <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
                               <a href={docResult.viewLink} target="_blank" rel="noreferrer" style={{ background:`${C.blue}18`, border:`1px solid ${C.blue}44`, borderRadius:6, color:C.blue, padding:"10px 22px", fontSize:13, fontWeight:600, textDecoration:"none" }}>📄 Open in Drive</a>
                               <a href={docResult.downloadLink} target="_blank" rel="noreferrer" style={{ background:`${C.green}18`, border:`1px solid ${C.green}44`, borderRadius:6, color:C.green, padding:"10px 22px", fontSize:13, fontWeight:600, textDecoration:"none" }}>⬇ Download DOCX</a>
@@ -648,7 +706,7 @@ export default function SubmittalBuilder() {
             </div>
 
             <div style={{ marginTop:16, padding:"10px 14px", background:`${C.green}0a`, border:`1px solid ${C.green}22`, borderRadius:8, fontSize:12, color:C.textDim }}>
-              📑 An <strong style={{ color:C.green }}>INDEX page</strong> listing {indexCount()} document{indexCount()===1?"":"s"} will be auto-generated and inserted after the cover.
+              📑 An <strong style={{ color:C.green }}>INDEX page</strong> listing {indexCount()} document{indexCount()===1?"":"s"} will be auto-generated and inserted after the cover. {frontPagesUsed() > 0 && <>· <strong style={{ color:C.green }}>{frontPagesUsed()} front page{frontPagesUsed()===1?"":"s"}</strong> will be prepended.</>}
             </div>
 
             <div style={{ marginTop:16, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
