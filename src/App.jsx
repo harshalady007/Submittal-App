@@ -16,7 +16,8 @@ const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS";
 // Looked up by exact filename in Drive via /submittal-search.
 const FRONT_PAGE_FILES = {
   tds:      "TECHNICAL DATA SHEET FRONT PAGE.pdf",
-  warranty: "DRAFT WARRANTY FRONT PAGE.pdf"
+  warranty: "DRAFT WARRANTY FRONT PAGE.pdf",
+  origin:   "Country of origin Front Page.pdf"
 };
 
 const DOC_TYPES = [
