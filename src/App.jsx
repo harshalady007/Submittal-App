@@ -7,6 +7,7 @@ const SEARCH_URL          = import.meta.env.VITE_N8N_SEARCH_URL          || "";
 const FILL_URL            = import.meta.env.VITE_N8N_FILL_URL            || "";
 const MERGE_URL           = import.meta.env.VITE_N8N_MERGE_URL           || "";
 const MERGE_FETCH_URL     = import.meta.env.VITE_N8N_MERGE_FETCH_URL     || "";
+const IMAGE_UPLOAD_URL    = import.meta.env.VITE_N8N_IMAGE_UPLOAD_URL    || "";
 const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 
 const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs";
@@ -175,7 +176,8 @@ export default function SubmittalBuilder() {
     productWarranty:"", productList:"",
     date:new Date().toISOString().split("T")[0],
     quoteNumber:"",
-    additionalInfo:""
+    additionalInfo:"",
+    productImageUrl:""
   });
   const [selected, setSelected]       = useState(new Set(["cover","tds","warranty"]));
   const [generated, setGenerated]     = useState({});
@@ -192,6 +194,11 @@ export default function SubmittalBuilder() {
   const [libLoading, setLibLoading]   = useState(false);
   const [libError, setLibError]       = useState("");
   const [autoMatchCount, setAutoMatchCount] = useState(0);
+
+  // Product image upload state
+  const [productImage, setProductImage]     = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError]         = useState("");
 
   // Auto-match Drive files for manual doc types + front pages for TDS/Warranty.
   useEffect(() => {
@@ -257,6 +264,46 @@ export default function SubmittalBuilder() {
     setLibraryTarget(docKey); setLibraryStartFolder(docDef?.defaultFolder || null); setLibraryOpen(true);
   }, []);
   const pickFile = useCallback(file => { setManualFiles(p=>({...p,[libraryTarget]:file})); setLibraryOpen(false); setLibraryTarget(null); setLibraryStartFolder(null); }, [libraryTarget]);
+
+  // Product image upload handlers
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!["image/jpeg","image/png","image/gif"].includes(file.type)) {
+      setImageError("JPEG, PNG or GIF only");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setImageError("Image too large (max 10MB)");
+      return;
+    }
+    if (!IMAGE_UPLOAD_URL) {
+      setImageError("VITE_N8N_IMAGE_UPLOAD_URL not set in env");
+      return;
+    }
+    setUploadingImage(true);
+    setImageError("");
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      const res = await fetch(IMAGE_UPLOAD_URL, { method:"POST", body:form });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+      if (!data.success || !data.publicUrl) throw new Error(data.message || "Upload returned no URL");
+      setProductImage(data);
+      set("productImageUrl", data.publicUrl);
+    } catch (err) {
+      setImageError(err.message);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removeImage = () => {
+    setProductImage(null);
+    set("productImageUrl", "");
+    setImageError("");
+  };
 
   const [merging, setMerging]     = useState(false);
   const [mergeError, setMergeError] = useState("");
@@ -453,6 +500,117 @@ export default function SubmittalBuilder() {
                     <input type="text" value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
                   </div>
                 ))}
+
+                {/* ── Product Reference Image ──────────────────────────── */}
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lbl}>
+                    Product Reference Image
+                    <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0, marginLeft:8 }}>
+                      (replaces image in TDS document)
+                    </span>
+                  </label>
+
+                  {!productImage ? (
+                    <div style={{
+                      border:`1px dashed ${C.border}`,
+                      borderRadius:6,
+                      padding:"20px 16px",
+                      background:"#0a111e",
+                      textAlign:"center"
+                    }}>
+                      <input
+                        type="file"
+                        id="product-image-input"
+                        accept="image/jpeg,image/png,image/gif"
+                        onChange={handleImageUpload}
+                        disabled={uploadingImage}
+                        style={{ display:"none" }}
+                      />
+                      <label
+                        htmlFor="product-image-input"
+                        style={{
+                          display:"inline-block",
+                          background:`${C.blue}18`,
+                          border:`1px solid ${C.blue}44`,
+                          borderRadius:6,
+                          color:C.blue,
+                          padding:"8px 18px",
+                          fontSize:13,
+                          fontWeight:600,
+                          cursor: uploadingImage ? "wait" : "pointer",
+                          opacity: uploadingImage ? 0.6 : 1
+                        }}
+                      >
+                        {uploadingImage ? "⏳ Uploading…" : "📷 Choose image"}
+                      </label>
+                      <div style={{ fontSize:11, color:C.textDim, marginTop:8 }}>
+                        JPEG, PNG or GIF · max 10MB · optional
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      border:`1px solid ${C.green}44`,
+                      borderRadius:6,
+                      padding:"12px 14px",
+                      background:`${C.green}08`,
+                      display:"flex",
+                      alignItems:"center",
+                      gap:14
+                    }}>
+                      <img
+                        src={productImage.publicUrl}
+                        alt="Product reference"
+                        style={{
+                          width:80,
+                          height:80,
+                          objectFit:"cover",
+                          borderRadius:4,
+                          border:`1px solid ${C.border}`,
+                          background:"#000"
+                        }}
+                      />
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ color:C.green, fontWeight:600, fontSize:13, marginBottom:4 }}>
+                          ✅ Image uploaded
+                        </div>
+                        <div style={{ color:C.textDim, fontSize:11, marginBottom:6, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {productImage.name}
+                        </div>
+                        <a
+                          href={productImage.viewUrl || productImage.publicUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color:C.blue, fontSize:11, textDecoration:"none" }}
+                        >
+                          Preview in Drive →
+                        </a>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeImage}
+                        style={{
+                          background:"transparent",
+                          border:`1px solid ${C.border}`,
+                          borderRadius:4,
+                          color:C.textDim,
+                          fontSize:12,
+                          padding:"6px 12px",
+                          cursor:"pointer",
+                          fontFamily:FF,
+                          flexShrink:0
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+
+                  {imageError && (
+                    <div style={{ marginTop:8, fontSize:12, color:"#fca5a5" }}>
+                      ⚠ {imageError}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -521,6 +679,7 @@ export default function SubmittalBuilder() {
                       {hasFp && <div title="Front page detected" style={{ flexShrink:0, background:`${C.green}18`, border:`1px solid ${C.green}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.green }}>FP</div>}
                       {doc.aiGenerated && <div style={{ flexShrink:0, background:`${C.blue}18`, border:`1px solid ${C.blue}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.blue }}>AI</div>}
                       {doc.manual && <div style={{ flexShrink:0, background:`${C.purple}18`, border:`1px solid ${C.purple}33`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.purple }}>DRIVE</div>}
+                      {doc.key==="tds" && info.productImageUrl && <div title="Product image will be inserted" style={{ flexShrink:0, background:`${C.accent}18`, border:`1px solid ${C.accent}44`, borderRadius:3, padding:"2px 7px", fontSize:10, fontWeight:700, color:C.accent }}>IMG</div>}
                     </div>
 
                     {on && doc.manual && (
@@ -556,6 +715,7 @@ export default function SubmittalBuilder() {
               <span><strong style={{ color:C.purple }}>{DOC_TYPES.filter(d=>d.manual&&selected.has(d.key)).length}</strong> Drive PDFs ({Object.keys(manualFiles).length} assigned)</span>
               <span><strong style={{ color:C.green }}>{indexCount()}</strong> on INDEX</span>
               <span><strong style={{ color:C.green }}>{[...selected].filter(k => frontPageFiles[k]).length}</strong> front pages</span>
+              {info.productImageUrl && selected.has("tds") && <span><strong style={{ color:C.accent }}>1</strong> product image in TDS</span>}
               <span><strong style={{ color:C.accent }}>{selected.size}</strong> total</span>
             </div>
 
@@ -633,6 +793,7 @@ export default function SubmittalBuilder() {
                         {doc.aiGenerated && <span style={{ fontSize:10, background:`${C.blue}18`, color:C.blue, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.blue}33`, fontWeight:700 }}>TEMPLATE FILLED</span>}
                         {doc.manual && <span style={{ fontSize:10, background:`${C.purple}18`, color:C.purple, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.purple}33`, fontWeight:700 }}>DRIVE PDF</span>}
                         {fpFile && <span style={{ fontSize:10, background:`${C.green}18`, color:C.green, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.green}33`, fontWeight:700 }}>FRONT PAGE</span>}
+                        {activeDoc==="tds" && info.productImageUrl && <span style={{ fontSize:10, background:`${C.accent}18`, color:C.accent, padding:"2px 8px", borderRadius:3, border:`1px solid ${C.accent}44`, fontWeight:700 }}>+ IMAGE</span>}
                         <div style={{ flex:1 }}/>
                         <span style={{ fontSize:11, color:C.textDim }}>{info.projectName}</span>
                       </div>
@@ -643,8 +804,13 @@ export default function SubmittalBuilder() {
                             <div style={{ fontWeight:700, fontSize:16, color:C.textBright, marginBottom:8 }}>{doc.label} — Filled</div>
                             <div style={{ fontSize:13, color:C.textDim, marginBottom:28 }}>Template filled and saved to Google Drive</div>
                             {fpFile && (
-                              <div style={{ marginBottom:24, padding:"10px 14px", background:`${C.green}10`, border:`1px solid ${C.green}33`, borderRadius:6, fontSize:12, color:C.green, display:"inline-block" }}>
+                              <div style={{ marginBottom:16, padding:"10px 14px", background:`${C.green}10`, border:`1px solid ${C.green}33`, borderRadius:6, fontSize:12, color:C.green, display:"inline-block" }}>
                                 📄 Front page will be prepended: <strong>{fpFile.name}</strong>
+                              </div>
+                            )}
+                            {activeDoc==="tds" && info.productImageUrl && (
+                              <div style={{ marginBottom:24, padding:"10px 14px", background:`${C.accent}10`, border:`1px solid ${C.accent}33`, borderRadius:6, fontSize:12, color:C.accent, display:"inline-block" }}>
+                                🖼️ Product image inserted into TDS
                               </div>
                             )}
                             <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
