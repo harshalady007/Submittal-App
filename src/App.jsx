@@ -256,7 +256,10 @@ export default function SubmittalBuilder() {
       .finally(() => setLibLoading(false));
   }, []);
 
-  const set    = (f,v) => setInfo(p=>({...p,[f]:v}));
+  const set    = (f,v) => {
+    if (typeof v === "string" && f !== "productImageUrl" && f !== "date") v = v.toUpperCase();
+    setInfo(p=>({...p,[f]:v}));
+  };
   const toggle = key => { setSelected(p=>{ const n=new Set(p); n.has(key)?n.delete(key):n.add(key); return n; }); setActivePreset(null); };
   const applyPreset = name => { setSelected(new Set(PRESETS[name])); setActivePreset(name); };
   const openLibrary = useCallback(docKey => {
@@ -478,7 +481,13 @@ export default function SubmittalBuilder() {
                 ].map(({ f,l,p,span,type })=>(
                   <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
                     <label style={lbl}>{l}</label>
-                    <input type={type||"text"} value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
+                    <input
+                      type={type||"text"}
+                      value={info[f]}
+                      onChange={e=>set(f, type==="date" ? e.target.value : e.target.value.toUpperCase())}
+                      placeholder={p}
+                      style={inputSt}
+                    />
                   </div>
                 ))}
               </div>
@@ -497,7 +506,13 @@ export default function SubmittalBuilder() {
                 ].map(({ f,l,p,span })=>(
                   <div key={f} style={span?{gridColumn:"1/-1"}:{}}>
                     <label style={lbl}>{l}</label>
-                    <input type="text" value={info[f]} onChange={e=>set(f,e.target.value)} placeholder={p} style={inputSt}/>
+                    <input
+                      type="text"
+                      value={info[f]}
+                      onChange={e=>set(f, e.target.value.toUpperCase())}
+                      placeholder={p}
+                      style={inputSt}
+                    />
                   </div>
                 ))}
 
@@ -619,15 +634,15 @@ export default function SubmittalBuilder() {
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
                 <div>
                   <label style={lbl}>Product Warranty</label>
-                  <input type="text" value={info.productWarranty} onChange={e=>set("productWarranty",e.target.value)} placeholder="e.g. 10 years manufacturer warranty" style={inputSt}/>
+                  <input type="text" value={info.productWarranty} onChange={e=>set("productWarranty", e.target.value.toUpperCase())} placeholder="e.g. 10 years manufacturer warranty" style={inputSt}/>
                 </div>
                 <div>
                   <label style={lbl}>Product List <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(for COO)</span></label>
-                  <input type="text" value={info.productList} onChange={e=>set("productList",e.target.value)} placeholder="e.g. Paving tiles, edging, adhesive" style={inputSt}/>
+                  <input type="text" value={info.productList} onChange={e=>set("productList", e.target.value.toUpperCase())} placeholder="e.g. Paving tiles, edging, adhesive" style={inputSt}/>
                 </div>
                 <div style={{ gridColumn:"1/-1" }}>
                   <label style={lbl}>Additional Details <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
-                  <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo",e.target.value)} placeholder="Color codes, specific standards, certifications, notes for Gemini…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
+                  <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo", e.target.value.toUpperCase())} placeholder="Color codes, specific standards, certifications, notes for Gemini…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
                 </div>
               </div>
             </div>
