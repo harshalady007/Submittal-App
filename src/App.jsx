@@ -36,6 +36,7 @@ const DOC_TYPES = [
   { key:"vendor_list",       label:"Vendor List",                     icon:"🗂️", aiGenerated:false, manual:true,  description:"Approved vendor / manufacturer list",           indexLabel:"VENDOR LIST",                                                                       autoKeywords:["vendor","vendor list","supplier list"] },
   { key:"company_profile",   label:"Company Profile",                 icon:"🏛️", aiGenerated:false, manual:true,  description:"Bluestream company profile from Drive",         indexLabel:"COMPANY PROFILE",                   preferredFilename:"Bluestream Company Profile.pdf", autoKeywords:["company profile","bluestream profile"] },
   { key:"project_reference", label:"Project Reference List",          icon:"📚", aiGenerated:false, manual:true,  description:"Project reference list from Drive",             indexLabel:"LIST OF PREVIOUS PROJECTS",         preferredFilename:"10. PROJECT REFERENCE LIST.pdf", autoKeywords:["project reference","reference list"] },
+  { key:"smarthub_registration", label:"SmartHub Registration",       icon:"📡", aiGenerated:false, manual:true,  description:"SmartHub registration certificate from Drive",  indexLabel:"SMARTHUB REGISTRATION",             preferredFilename:"SMARTHUBREGISTRATION.pdf",      autoKeywords:["smarthub","smart hub","smarthub registration"] },
 ];
 
 const PRESETS = {
