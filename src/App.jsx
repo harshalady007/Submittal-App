@@ -13,6 +13,9 @@ const PDFCO_KEY           = import.meta.env.VITE_PDFCO_KEY              || "";
 const DRIVE_ROOT_FOLDER       = "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs";
 const TEST_CERT_FOLDER        = "16ItTnrZPaIBbo6c0oOKntV1tjKFeQXRS";
 
+// Fields that should NOT be auto-uppercased — kept exactly as typed/pasted.
+const NO_UPPERCASE_FIELDS = new Set(["productImageUrl", "date", "materialSpec"]);
+
 // Front page PDFs prepended before TDS / Warranty in the final merged PDF.
 // Looked up by exact filename in Drive via /submittal-search.
 const FRONT_PAGE_FILES = {
@@ -257,9 +260,12 @@ export default function SubmittalBuilder() {
       .finally(() => setLibLoading(false));
   }, []);
 
-  const set    = (f,v) => {
-    if (typeof v === "string" && f !== "productImageUrl" && f !== "date") v = v.toUpperCase();
-    setInfo(p=>({...p,[f]:v}));
+  // Helper: should this field be auto-uppercased?
+  const shouldUpper = (f) => !NO_UPPERCASE_FIELDS.has(f);
+
+  const set = (f, v) => {
+    if (typeof v === "string" && shouldUpper(f)) v = v.toUpperCase();
+    setInfo(p => ({ ...p, [f]: v }));
   };
   const toggle = key => { setSelected(p=>{ const n=new Set(p); n.has(key)?n.delete(key):n.add(key); return n; }); setActivePreset(null); };
   const applyPreset = name => { setSelected(new Set(PRESETS[name])); setActivePreset(name); };
@@ -485,7 +491,7 @@ export default function SubmittalBuilder() {
                     <input
                       type={type||"text"}
                       value={info[f]}
-                      onChange={e=>set(f, type==="date" ? e.target.value : e.target.value.toUpperCase())}
+                      onChange={e=>set(f, e.target.value)}
                       placeholder={p}
                       style={inputSt}
                     />
@@ -510,7 +516,7 @@ export default function SubmittalBuilder() {
                     <input
                       type="text"
                       value={info[f]}
-                      onChange={e=>set(f, e.target.value.toUpperCase())}
+                      onChange={e=>set(f, e.target.value)}
                       placeholder={p}
                       style={inputSt}
                     />
@@ -635,15 +641,15 @@ export default function SubmittalBuilder() {
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
                 <div>
                   <label style={lbl}>Product Warranty</label>
-                  <input type="text" value={info.productWarranty} onChange={e=>set("productWarranty", e.target.value.toUpperCase())} placeholder="e.g. 10 years manufacturer warranty" style={inputSt}/>
+                  <input type="text" value={info.productWarranty} onChange={e=>set("productWarranty", e.target.value)} placeholder="e.g. 10 years manufacturer warranty" style={inputSt}/>
                 </div>
                 <div>
                   <label style={lbl}>Product List <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(for COO)</span></label>
-                  <input type="text" value={info.productList} onChange={e=>set("productList", e.target.value.toUpperCase())} placeholder="e.g. Paving tiles, edging, adhesive" style={inputSt}/>
+                  <input type="text" value={info.productList} onChange={e=>set("productList", e.target.value)} placeholder="e.g. Paving tiles, edging, adhesive" style={inputSt}/>
                 </div>
                 <div style={{ gridColumn:"1/-1" }}>
                   <label style={lbl}>Additional Details <span style={{ color:C.textDim, fontWeight:400, textTransform:"none", letterSpacing:0 }}>(optional)</span></label>
-                  <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo", e.target.value.toUpperCase())} placeholder="Color codes, specific standards, certifications, notes for Gemini…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
+                  <textarea value={info.additionalInfo} onChange={e=>set("additionalInfo", e.target.value)} placeholder="Color codes, specific standards, certifications, notes for Gemini…" style={{ ...inputSt, height:72, resize:"vertical" }}/>
                 </div>
               </div>
             </div>
