@@ -29,6 +29,8 @@ const DOC_TYPES = [
   { key:"tds",               label:"Technical Data Sheet",            icon:"⚙️",  aiGenerated:true,  manual:false, description:"Full product technical specifications", indexLabel:"TECHNICAL DATA SHEET" },
   { key:"warranty",          label:"Draft Warranty Certificate",      icon:"🛡️", aiGenerated:true,  manual:false, description:"Manufacturer warranty terms", indexLabel:"DRAFT WARRANTY CERTIFICATES & GUARANTEE" },
   { key:"origin",            label:"Country of Origin",               icon:"🌐", aiGenerated:true,  manual:false, description:"Declaration of product manufacturing origin", indexLabel:"COUNTRY OF ORIGIN" },
+  { key:"maf",               label:"Material Approval Form (MAF)",     icon:"🧾", aiGenerated:true,  manual:false, kind:"sheet", description:"ADM Material Approval Form — auto-filled from Drive sheet", indexLabel:"MATERIAL APPROVAL FORM (MAF)" },
+  { key:"msdf",              label:"Material Source Declaration (MSDF)", icon:"📑", aiGenerated:true, manual:false, kind:"sheet", description:"ADM Material Source Declaration Form from Drive sheet", indexLabel:"MATERIAL SOURCE DECLARATION FORM (MSDF)" },
   { key:"compliance",        label:"Compliance Statement",            icon:"✅", aiGenerated:true,  manual:false, description:"Standards & spec compliance declaration", indexLabel:"TECHNICAL COMPLIANCES" },
   { key:"test_cert",         label:"Test Certificate",                icon:"🧪", aiGenerated:false, manual:true,  description:"Pick test certificate from Drive folder", indexLabel:"TEST REPORT", defaultFolder:TEST_CERT_FOLDER },
   { key:"material_schedule", label:"Material Schedule",               icon:"📋", aiGenerated:true,  manual:false, description:"Itemized material list for project", indexLabel:"MATERIAL SCHEDULE" },
@@ -43,7 +45,7 @@ const DOC_TYPES = [
 ];
 
 const PRESETS = {
-  "Municipality":      ["cover","tds","warranty","origin","compliance","material_schedule","previous_approval","iso_cert","company_profile","project_reference"],
+  "Municipality":      ["cover","maf","msdf","tds","warranty","origin","compliance","material_schedule","previous_approval","iso_cert","company_profile","project_reference"],
   "Private Developer": ["cover","tds","warranty","previous_approval","trade_license","company_profile"],
   "DEWA / Utility":    ["cover","tds","warranty","origin","compliance","test_cert","material_schedule","iso_cert","company_profile","project_reference"],
   "Full Package":      DOC_TYPES.map(d=>d.key),
