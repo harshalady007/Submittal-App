@@ -1,0 +1,440 @@
+{
+  "name": "Submittal Template Filler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "submittal-fill",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "e585ec33-eaae-425a-8ed9-8fb12b8039f2",
+      "name": "Fill Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "3cd0bc86-0289-47bb-bc02-609106e33cff"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst TEMPLATES = {\n  cover:    '1th6qlcsAwd0Sd3sOUo7lQ28PsaHMv20CbR6sivr_sjE',\n  tds:      '1pQ4elE7evs4TmKnXYlCiVUPLdO0-SXJ1y4YAFErEPXU',\n  warranty: '1equRpuRmmfq1Xs28kE6m7SVOcCIK4VpufzwRpaaxHgw',\n  origin:   '14XKE586Vl8GX6hFZVUF2AIH8_6fhzceV_xs3Q8uMY6U'\n};\nconst SHEET_TEMPLATES = {\n  maf:  '1lgUIHGJx9pgap4ODM4gq2x7k7EJTDwu4uqE2T6HZOMQ',\n  msdf: '1XTXQ8y2WUUfeQirBasZ85kmvWpN6yBuuIzRsfCuzwSc'\n};\nconst ALL = Object.assign({}, TEMPLATES, SHEET_TEMPLATES);\nconst aiDocs = (body.selectedDocs || []).filter(k => ALL[k]);\nif (aiDocs.length === 0) return [{ json: { _empty: true, projectInfo: body.projectInfo } }];\nconst date = new Date(body.projectInfo.date || Date.now());\nconst dd = String(date.getDate()).padStart(2,'0');\nconst mm = String(date.getMonth()+1).padStart(2,'0');\nreturn aiDocs.map(docKey => ({\n  json: {\n    docKey,\n    templateId: ALL[docKey],\n    kind: SHEET_TEMPLATES[docKey] ? 'sheet' : 'doc',\n    projectInfo: body.projectInfo,\n    refNumber: docKey === 'origin' ? 'MS-COO-' + dd + '-' + mm + '-01' : 'MS-DW-' + dd + '-' + mm + '-01'\n  }\n}));"
+      },
+      "id": "9e859417-0f57-4888-b3ff-9f3bf0758c20",
+      "name": "Build Template Map",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://www.googleapis.com/drive/v3/files/\" + $json.templateId + \"/copy\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { name: $json.projectInfo.projectName + \" - \" + $json.docKey + \" - \" + $now.toFormat(\"yyyyMMdd-HHmmss\") } }}",
+        "options": {}
+      },
+      "id": "b95e3674-6926-49d3-8b86-3df07e343dbe",
+      "name": "Copy Template",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://docs.googleapis.com/v1/documents/\" + $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fe3bb867-364a-41bc-b3a1-f67a49aa9b86",
+      "name": "Get Doc Structure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const doc = $input.item.json;\nconst copy = $('Copy Template').itemMatching($itemIndex).json;\nconst orig = $('Build Template Map').itemMatching($itemIndex).json;\nconst p = orig.projectInfo || {};\n\nconst formatDate = (s) => {\n  if (!s) return '';\n  const m = String(s).match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  if (m) return m[3] + '-' + m[2] + '-' + m[1];\n  return s;\n};\nconst safe = (v) => (v === null || v === undefined) ? '' : String(v);\nconst withMs = (val) => {\n  const s = safe(val).trim();\n  return s ? 'M/s. ' + s : '';\n};\n\nconst PRODUCT_EXCLUSIONS = [\n  { match: ['litter bin','litterbin','waste bin','wastebin','trash bin','trashbin',\n            'litter container','recycle bin','recyclebin','recycling bin'],\n    text: ' excluding liners' }\n];\nconst detectExclusion = (productName, productList) => {\n  const hay = (safe(productName) + ' ' + safe(productList)).toLowerCase();\n  for (const rule of PRODUCT_EXCLUSIONS) {\n    if (rule.match.some(kw => hay.includes(kw))) return rule.text;\n  }\n  return '';\n};\nconst exclusionClause = detectExclusion(p.productName, p.productList);\n\nconst replacements = {\n  'M/s. {{CLIENT}}':           withMs(p.client),\n  'M/s.  {{CLIENT}}':          withMs(p.client),\n  'M/s. {{MAIN_CONTRACTOR}}':  withMs(p.mainContractor),\n  'M/s.  {{MAIN_CONTRACTOR}}': withMs(p.mainContractor),\n  'M/s. {{SUB_CONTRACTOR}}':   withMs(p.subContractor),\n  'M/s.  {{SUB_CONTRACTOR}}':  withMs(p.subContractor),\n  '{{PROJECT_NAME}}':    safe(p.projectName),\n  '{{CLIENT}}':          safe(p.client),\n  '{{MAIN_CONTRACTOR}}': safe(p.mainContractor),\n  '{{SUB_CONTRACTOR}}':  safe(p.subContractor),\n  '{{PRODUCT_NAME}}':    safe(p.productName),\n  '{{MATERIAL_SPEC}}':   safe(p.materialSpec),\n  '{{DIMENSIONS}}':      safe(p.dimensions),\n  '{{MATERIAL}}':        safe(p.material),\n  '{{FINISH}}':          safe(p.finish),\n  '{{PRODUCT_WARRANTY}}':safe(p.productWarranty).toLowerCase(),\n  '{{PRODUCT_LIST}}':    safe(p.productList),\n  '{{REF_NUMBER}}':      safe(orig.refNumber),\n  '{{DATE}}':            formatDate(p.date),\n  '{{QUOTE}}':           safe(p.quoteNumber),\n  '{{QUOTE_NUMBER}}':    safe(p.quoteNumber),\n  '{{QUOTATION}}':       safe(p.quoteNumber),\n  '{{QUOTATION_NUMBER}}':safe(p.quoteNumber),\n  '{{EXCLUSION_CLAUSE}}':exclusionClause\n};\nconst requests = Object.entries(replacements).map(([k,v]) => ({\n  replaceAllText: { containsText: { text: k, matchCase: true }, replaceText: String(v) }\n}));\n\nlet imgDebug = { tdsAndUrl: orig.docKey==='tds' && !!p.productImageUrl,\n  bodyInline:0, bodyPositioned:0, chosen:null, chosenType:null };\n\nif (orig.docKey === 'tds' && p.productImageUrl) {\n  const bodyInlineIds = [];\n  const bodyPositionedIds = [];\n  const walk = (content) => {\n    if (!Array.isArray(content)) return;\n    for (const el of content) {\n      if (el.paragraph && Array.isArray(el.paragraph.elements)) {\n        for (const pe of el.paragraph.elements) {\n          if (pe.inlineObjectElement && pe.inlineObjectElement.inlineObjectId)\n            bodyInlineIds.push(pe.inlineObjectElement.inlineObjectId);\n          if (pe.positionedObjectReferenceElement && pe.positionedObjectReferenceElement.positionedObjectId)\n            bodyPositionedIds.push(pe.positionedObjectReferenceElement.positionedObjectId);\n        }\n      }\n      if (el.table && el.table.tableRows) {\n        for (const row of el.table.tableRows)\n          for (const cell of (row.tableCells||[])) walk(cell.content);\n      }\n    }\n  };\n  walk(doc.body && doc.body.content);\n  imgDebug.bodyInline = bodyInlineIds.length;\n  imgDebug.bodyPositioned = bodyPositionedIds.length;\n\n  let target = null;\n  if (bodyPositionedIds.length) target = { type:'positioned', id: bodyPositionedIds[bodyPositionedIds.length-1] };\n  else if (bodyInlineIds.length) target = { type:'inline', id: bodyInlineIds[bodyInlineIds.length-1] };\n  else if (doc.positionedObjects && Object.keys(doc.positionedObjects).length) {\n    const ks = Object.keys(doc.positionedObjects);\n    target = { type:'positioned-fallback', id: ks[ks.length-1] };\n  }\n\n  if (target) {\n    let size = null;\n    if (target.type === 'inline' && doc.inlineObjects && doc.inlineObjects[target.id]) {\n      size = doc.inlineObjects[target.id].inlineObjectProperties &&\n             doc.inlineObjects[target.id].inlineObjectProperties.embeddedObject &&\n             doc.inlineObjects[target.id].inlineObjectProperties.embeddedObject.size;\n    } else if (doc.positionedObjects && doc.positionedObjects[target.id]) {\n      size = doc.positionedObjects[target.id].positionedObjectProperties &&\n             doc.positionedObjects[target.id].positionedObjectProperties.embeddedObject &&\n             doc.positionedObjects[target.id].positionedObjectProperties.embeddedObject.size;\n    }\n    const w = Math.round((size && size.width && size.width.magnitude) || 200);\n    const h = Math.round((size && size.height && size.height.magnitude) || 300);\n    const wrappedUrl = 'https://wsrv.nl/?url=' + encodeURIComponent(p.productImageUrl)\n      + '&w=' + (w*3) + '&h=' + (h*3) + '&fit=contain&cbg=white&output=jpg&q=90';\n    imgDebug.chosen = target.id;\n    imgDebug.chosenType = target.type;\n    requests.push({\n      replaceImage: { imageObjectId: target.id, uri: wrappedUrl, imageReplaceMethod: 'CENTER_CROP' }\n    });\n  }\n}\n\nreturn { json: { docId: copy.id, docKey: orig.docKey, requests, _imgDebug: imgDebug } };"
+      },
+      "id": "e7e435ed-f659-4581-84f4-8441b1e9dece",
+      "name": "Build Replacements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://docs.googleapis.com/v1/documents/\" + $json.docId + \":batchUpdate\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { requests: $json.requests } }}",
+        "options": {}
+      },
+      "id": "68e84d64-10df-4085-8090-93d4af8ce535",
+      "name": "Call Docs API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const br = $('Build Replacements').itemMatching($itemIndex).json;\nreturn {\n  json: {\n    docKey: br.docKey,\n    viewLink: 'https://docs.google.com/document/d/' + br.docId + '/edit',\n    downloadLink: 'https://docs.google.com/document/d/' + br.docId + '/export?format=docx',\n    _imgDebug: br._imgDebug\n  }\n};"
+      },
+      "id": "3bc4bb12-f604-4479-90ef-0364bb4514e0",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = {};\nconst debug = {};\nfor (const item of $input.all()) {\n  if (item.json && item.json.docKey) {\n    docs[item.json.docKey] = { viewLink: item.json.viewLink, downloadLink: item.json.downloadLink };\n    if (item.json._imgDebug) debug[item.json.docKey] = item.json._imgDebug;\n  }\n}\nreturn [{ json: { success: true, documents: docs, _imgDebug: debug } }];"
+      },
+      "id": "0f812d78-83e1-415b-8bd4-a2e3c22f3b9c",
+      "name": "Aggregate Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ce642ae3-1e1a-45aa-8f87-b6162b19cdba",
+      "name": "Respond Fill",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        0
+      ]
+    },
+    {
+      "id": "afe6b4a4-1fd0-4710-bb13-476df8da373f",
+      "name": "Is Sheet",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        820,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $('Build Template Map').itemMatching($itemIndex).json.kind }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "sheet"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "56182062-8663-411e-b13b-984bec7bbbe8",
+      "name": "Build Sheet Replacements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const copy = $('Copy Template').itemMatching($itemIndex).json;\nconst orig = $('Build Template Map').itemMatching($itemIndex).json;\nconst p = orig.projectInfo || {};\nconst safe = (v) => (v === null || v === undefined) ? '' : String(v);\nconst formatDate = (s) => {\n  const m = String(s || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  return m ? m[3] + '-' + m[2] + '-' + m[1] : safe(s);\n};\nconst reps = {\n  '{{PROJECT_NAME}}':     safe(p.projectName),\n  '{{CLIENT}}':           safe(p.client),\n  '{{MAIN_CONTRACTOR}}':  safe(p.mainContractor),\n  '{{SUB_CONTRACTOR}}':   safe(p.subContractor),\n  '{{CONSULTANT}}':       safe(p.consultant),\n  '{{LOCATION}}':         safe(p.location),\n  '{{PRODUCT_NAME}}':     safe(p.productName),\n  '{{MATERIAL_SPEC}}':    safe(p.materialSpec),\n  '{{DIMENSIONS}}':       safe(p.dimensions),\n  '{{MATERIAL}}':         safe(p.material),\n  '{{FINISH}}':           safe(p.finish),\n  '{{DATE}}':             formatDate(p.date),\n  '{{QUOTE}}':            safe(p.quoteNumber),\n  '{{QUOTE_NUMBER}}':     safe(p.quoteNumber),\n  '{{QUOTATION}}':        safe(p.quoteNumber),\n  '{{QUOTATION_NUMBER}}': safe(p.quoteNumber),\n  '{{REF_NUMBER}}':       safe(orig.refNumber)\n};\nconst requests = Object.entries(reps).map(([find, replacement]) => ({\n  findReplace: { find: find, replacement: String(replacement), matchCase: true, allSheets: true }\n}));\nreturn { json: { sheetId: copy.id, docKey: orig.docKey, requests: requests } };",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "28e5a385-de51-4e80-9bef-be93e418dc4d",
+      "name": "Call Sheets API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1260,
+        220
+      ],
+      "parameters": {
+        "jsonBody": "={{ { requests: $json.requests } }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "={{ \"https://sheets.googleapis.com/v4/spreadsheets/\" + $json.sheetId + \":batchUpdate\" }}"
+      },
+      "notes": "ATTACH Google Sheets OAuth2 cred manually in UI before publishing."
+    },
+    {
+      "id": "1c6a6852-da50-4eaa-aa49-70f348bb63aa",
+      "name": "Build Sheet Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const sr = $('Build Sheet Replacements').itemMatching($itemIndex).json;\nreturn { json: {\n  docKey: sr.docKey,\n  viewLink: 'https://docs.google.com/spreadsheets/d/' + sr.sheetId + '/edit',\n  downloadLink: 'https://docs.google.com/spreadsheets/d/' + sr.sheetId + '/export?format=xlsx'\n}};",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "fc505364-f819-41c6-878a-65fbc5c06742",
+      "name": "Combine Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1700,
+        0
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Fill Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Template Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Template Map": {
+      "main": [
+        [
+          {
+            "node": "Copy Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Doc Structure": {
+      "main": [
+        [
+          {
+            "node": "Build Replacements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Replacements": {
+      "main": [
+        [
+          {
+            "node": "Call Docs API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Docs API": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Documents": {
+      "main": [
+        [
+          {
+            "node": "Respond Fill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Template": {
+      "main": [
+        [
+          {
+            "node": "Is Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Sheet": {
+      "main": [
+        [
+          {
+            "node": "Build Sheet Replacements",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Doc Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sheet Replacements": {
+      "main": [
+        [
+          {
+            "node": "Call Sheets API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Sheets API": {
+      "main": [
+        [
+          {
+            "node": "Build Sheet Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sheet Result": {
+      "main": [
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine Results": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  }
+}

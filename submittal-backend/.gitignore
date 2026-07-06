@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+package/
+lambda.zip
+app/assets/fonts/*.ttf

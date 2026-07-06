@@ -1,0 +1,874 @@
+{
+  "name": "Submittal PDF Merge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "submittal-merge",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "6c4380a8-6072-4ff7-8a25-3756b04e0785",
+      "name": "Merge Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        96
+      ],
+      "webhookId": "1fd9f366-3b82-4305-be17-686fcf687d72"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nif (!body.pdfcoKey || !body.pdfcoKey.includes('@')) throw new Error('Invalid PDF.co key');\nconst filled = body.filledDocs || [];\nconst drive = body.driveFileIds || [];\nif (filled.length === 0 && drive.length === 0) throw new Error('No documents to merge');\nreturn [{ json: body }];"
+      },
+      "id": "ca5b0f5f-c4f6-4732-955f-9920947a4492",
+      "name": "Validate Merge Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Validate Merge Input').first().json;\nconst tasks = [];\nlet fallback = 0;\nfor (const doc of body.filledDocs || []) {\n  const m = (doc.viewLink || '').match(/\\/d\\/([a-zA-Z0-9_-]+)/);\n  if (!m) continue;\n  tasks.push({\n    type: 'filled',\n    fileId: m[1],\n    docKey: doc.docKey,\n    exportUrl: 'https://www.googleapis.com/drive/v3/files/' + m[1] + '/export?mimeType=application%2Fpdf',\n    presignUrl: 'https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/pdf&name=' + encodeURIComponent(doc.docKey + '.pdf'),\n    outputName: body.outputName,\n    pdfcoKey: body.pdfcoKey,\n    orderIndex: typeof doc.orderIndex === 'number' ? doc.orderIndex : fallback++\n  });\n}\nfor (const f of body.driveFileIds || []) {\n  if (!f.fileId) continue;\n  tasks.push({\n    type: 'drive',\n    fileId: f.fileId,\n    docKey: f.docKey,\n    permUrl: 'https://www.googleapis.com/drive/v3/files/' + f.fileId + '/permissions',\n    publicUrl: 'https://drive.usercontent.google.com/download?id=' + f.fileId + '&export=download&confirm=t',\n    outputName: body.outputName,\n    pdfcoKey: body.pdfcoKey,\n    orderIndex: typeof f.orderIndex === 'number' ? f.orderIndex : fallback++\n  });\n}\nreturn tasks.map(t => ({ json: t }));"
+      },
+      "id": "2d89f3ac-2cb7-4ed8-9a03-5d1cc249368c",
+      "name": "Build Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.type }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "filled"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "838a04a9-a852-4310-a915-7ed2085b1252",
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.exportUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "840491ff-29b0-4891-97e1-8949de618fae",
+      "name": "Export Drive Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Build Tasks').itemMatching($itemIndex).json.presignUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $('Build Tasks').itemMatching($itemIndex).json.pdfcoKey }}"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 700
+            }
+          }
+        }
+      },
+      "id": "4465e04d-4858-4829-a360-d7cd84633e4a",
+      "name": "Get Presigned URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const driveItem = $('Export Drive Doc').itemMatching($itemIndex);\n$input.item.binary = driveItem.binary;\nreturn $input.item;"
+      },
+      "id": "76c5ed81-2649-4e14-94c6-f36222be5f54",
+      "name": "Reattach Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.presignedUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "61e9e9ef-af6e-44a0-8369-18c4affc796a",
+      "name": "Upload to S3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const orig = $('Build Tasks').itemMatching($itemIndex).json;\nconst presigned = $('Get Presigned URL').itemMatching($itemIndex).json;\nreturn {\n  json: {\n    type: 'filled',\n    docKey: orig.docKey,\n    url: presigned.url,\n    orderIndex: orig.orderIndex,\n    outputName: orig.outputName,\n    pdfcoKey: orig.pdfcoKey\n  }\n};"
+      },
+      "id": "6ec59549-e178-4fe8-93ce-3dc5488e8b84",
+      "name": "Mark Filled Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1fe0ae37-de9a-4119-b984-3758c322dc58",
+      "name": "Merge Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2016,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.permUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { role: \"reader\", type: \"anyone\" } }}",
+        "options": {}
+      },
+      "id": "ed5d5e63-4650-47f4-8760-37f3aae8b292",
+      "name": "Grant Permission",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1568,
+        192
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const orig = $('Build Tasks').itemMatching($itemIndex).json;\nconst perm = $input.item.json;\nreturn {\n  json: {\n    type: 'drive',\n    docKey: orig.docKey,\n    fileId: orig.fileId,\n    permissionId: perm.id,\n    url: orig.publicUrl,\n    orderIndex: orig.orderIndex,\n    outputName: orig.outputName,\n    pdfcoKey: orig.pdfcoKey\n  }\n};"
+      },
+      "id": "763c7bb6-67a6-44b1-9e53-58e8a5eb3812",
+      "name": "Mark Drive Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nitems.sort((a,b) => a.orderIndex - b.orderIndex);\nreturn [{ json: {\n  urls: items.map(i => i.url),\n  items: items.map(i => ({ docKey: i.docKey, url: i.url, type: i.type })),\n  permissionData: items.filter(i => i.type === 'drive' && i.permissionId).map(i => ({ fileId: i.fileId, permissionId: i.permissionId })),\n  outputName: items[0].outputName,\n  pdfcoKey: items[0].pdfcoKey,\n  fileCount: items.length\n} }];"
+      },
+      "id": "b5019638-24ac-4165-b904-50abb8db6d76",
+      "name": "Aggregate URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Validate Merge Input').first().json;\nconst agg = $input.first().json;\nconst items = body.indexItems || [];\nconst roman = (n) => { const map = [['M',1000],['CM',900],['D',500],['CD',400],['C',100],['XC',90],['L',50],['XL',40],['X',10],['IX',9],['V',5],['IV',4],['I',1]]; let r='',x=n; for (const [s,v] of map) while (x>=v){r+=s;x-=v;} return r; };\nconst esc = (s) => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));\nconst rows = items.map((it,i) => '<tr><td class=\"num\">'+roman(i+1)+'.</td><td class=\"name\">'+esc(it.label)+'</td></tr>').join('\\n');\nconst html = '<!DOCTYPE html><html><head><meta charset=\"utf-8\"/><style>@import url(\"https://fonts.googleapis.com/css2?family=Playfair+Display&family=Roboto+Flex:wght@300;400;500&display=swap\");@page { size: A4; margin: 0; }html, body { margin: 0; padding: 0; }body { font-family: \"Roboto Flex\", Arial, sans-serif; color: #1C1C1C; padding: 90px 90px; position: relative; }h1 { font-family: \"Playfair Display\", Georgia, serif; color: #7C0000; text-align: center; font-size: 36pt; font-weight: 400; margin: 40px 0 70px 0; letter-spacing: 0.04em; }table { margin: 0; border-collapse: collapse; }td { padding: 11px 0; vertical-align: top; }td.num { width: 50px; padding-left: 0; font-size: 11pt; font-weight: 400; }td.name { font-size: 11pt; font-weight: 500; letter-spacing: 0.04em; padding-left: 20px; padding-right: 30px; }</style></head><body><h1>INDEX</h1><table>'+rows+'</table></body></html>';\nreturn [{ json: { skip: items.length === 0, html, pdfcoKey: agg.pdfcoKey, outputName: agg.outputName, urls: agg.urls, items: agg.items, permissionData: agg.permissionData, fileCount: agg.fileCount } }];"
+      },
+      "id": "8baeb4f6-d8b0-4ef1-b7e0-d06e082a3311",
+      "name": "Build Index HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pdf.co/v1/pdf/convert/from/html",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.pdfcoKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { html: $json.html, name: ($json.outputName || \"submittal\") + \"_index.pdf\", async: false, margins: \"20mm\", paperSize: \"A4\", printBackground: true } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "0566142a-5cfa-4fcc-9a67-4b6fc9626fae",
+      "name": "Generate Index PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2688,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const bh = $('Build Index HTML').first().json;\nconst httpRes = $input.first().json;\nconst indexUrl = httpRes && httpRes.url ? httpRes.url : null;\nif (bh.skip || !indexUrl) {\n  return [{ json: { urls: bh.urls, permissionData: bh.permissionData, outputName: bh.outputName, pdfcoKey: bh.pdfcoKey, fileCount: bh.fileCount, indexUrl: null }}];\n}\nconst items = bh.items || [];\nconst coverIdx = items.findIndex(i => i.docKey === 'cover');\nconst insertAt = coverIdx >= 0 ? coverIdx + 1 : 0;\nconst urls = [...bh.urls];\nurls.splice(insertAt, 0, indexUrl);\nreturn [{ json: { urls, permissionData: bh.permissionData, outputName: bh.outputName, pdfcoKey: bh.pdfcoKey, fileCount: bh.fileCount + 1, indexUrl, insertedAt: insertAt }}];"
+      },
+      "id": "367332b0-165e-423d-a924-938227d5bd24",
+      "name": "Prepend Index",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pdf.co/v1/pdf/merge2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.pdfcoKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { url: $json.urls.join(\",\"), name: $json.outputName + \".pdf\", async: true } }}",
+        "options": {
+          "timeout": 25000
+        }
+      },
+      "id": "b76be0dd-47a6-4c80-b879-824e748f0282",
+      "name": "Start Async Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3136,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nif (!res.jobId) throw new Error('No jobId returned from PDF.co');\nconst pre = $('Prepend Index').first().json;\nreturn [{ json: { success: true, jobId: res.jobId, mergedUrl: res.url, pdfcoKey: pre.pdfcoKey, outputName: pre.outputName, fileCount: pre.fileCount, permissionData: pre.permissionData, indexUrl: pre.indexUrl } }];"
+      },
+      "id": "42249881-9dbb-4a23-a7c1-7158beec77da",
+      "name": "Build Start Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1c722f25-9651-4772-ae68-ec3522992745",
+      "name": "Respond Merge Start",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3584,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "submittal-merge-fetch",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "f8ec9e93-f503-427e-b92d-2b6f18536d37",
+      "name": "Fetch Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        512
+      ],
+      "webhookId": "78f1014d-5411-49bf-a3d5-d9bbc7ba5cbc"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nif (!body.jobId) throw new Error('Missing jobId');\nif (!body.pdfcoKey) throw new Error('Missing pdfcoKey');\nif (!body.mergedUrl) throw new Error('Missing mergedUrl');\nreturn [{ json: body }];"
+      },
+      "id": "626b4a3f-ee80-42fe-bb78-ef1704d7e512",
+      "name": "Validate Fetch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.pdf.co/v1/job/check?jobid=\" + $json.jobId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.pdfcoKey }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "b04c0870-3756-4624-b242-45fff6a463c2",
+      "name": "Check Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const httpRes = $input.first().json;\nconst inputBody = $('Validate Fetch').first().json;\nconst body = httpRes.body || {};\nif (body.status === 'failed' || body.status === 'aborted') {\n  return [{ json: { ready: false, error: true, message: body.message || 'Job failed', status: body.status } }];\n}\nif (body.status === 'success') {\n  return [{ json: { ready: true, mergedUrl: inputBody.mergedUrl, outputName: inputBody.outputName, fileCount: inputBody.fileCount } }];\n}\nreturn [{ json: { ready: false, status: body.status || 'unknown' } }];"
+      },
+      "id": "b8ada86b-fb7a-4ca0-8436-3c47cc260500",
+      "name": "Eval Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ready }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": true
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "adeeed0f-f777-47cb-bf46-491ad447a31c",
+      "name": "Is Ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $input.first().json;\nreturn [{ json: { ready: true, success: true, mergedUrl: meta.mergedUrl, filename: (meta.outputName || 'submittal') + '.pdf', fileCount: meta.fileCount } }];"
+      },
+      "id": "512e78c5-3775-464c-a566-235645fa8bf4",
+      "name": "Build URL Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ee143175-3597-4c70-9d35-fac7aa14253a",
+      "name": "Respond Ready",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "5ede4743-9122-4602-8368-b6595675d498",
+      "name": "Respond Not Ready",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        608
+      ]
+    }
+  ],
+  "connections": {
+    "Merge Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Merge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Merge Input": {
+      "main": [
+        [
+          {
+            "node": "Build Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tasks": {
+      "main": [
+        [
+          {
+            "node": "Route by Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Type": {
+      "main": [
+        [
+          {
+            "node": "Export Drive Doc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Grant Permission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export Drive Doc": {
+      "main": [
+        [
+          {
+            "node": "Get Presigned URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Presigned URL": {
+      "main": [
+        [
+          {
+            "node": "Reattach Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reattach Binary": {
+      "main": [
+        [
+          {
+            "node": "Upload to S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to S3": {
+      "main": [
+        [
+          {
+            "node": "Mark Filled Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Filled Done": {
+      "main": [
+        [
+          {
+            "node": "Merge Branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Branches": {
+      "main": [
+        [
+          {
+            "node": "Aggregate URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grant Permission": {
+      "main": [
+        [
+          {
+            "node": "Mark Drive Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Drive Done": {
+      "main": [
+        [
+          {
+            "node": "Merge Branches",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Aggregate URLs": {
+      "main": [
+        [
+          {
+            "node": "Build Index HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Index HTML": {
+      "main": [
+        [
+          {
+            "node": "Generate Index PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Index PDF": {
+      "main": [
+        [
+          {
+            "node": "Prepend Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepend Index": {
+      "main": [
+        [
+          {
+            "node": "Start Async Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Async Merge": {
+      "main": [
+        [
+          {
+            "node": "Build Start Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Start Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Merge Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Fetch": {
+      "main": [
+        [
+          {
+            "node": "Check Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Job Status": {
+      "main": [
+        [
+          {
+            "node": "Eval Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eval Status": {
+      "main": [
+        [
+          {
+            "node": "Is Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Ready": {
+      "main": [
+        [
+          {
+            "node": "Build URL Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build URL Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 2,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "name": "Submittal Drive Search",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "submittal-search",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "2fcb2b7c-3154-41c6-8db1-74b68778f2f1",
+      "name": "Search Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b1a71cf5-934c-43fc-8546-11d94f5cd9e7"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst queries = body.queries || {};\nconst preferredFilenames = body.preferredFilenames || {};\nconst allKws = new Set();\nfor (const k of Object.keys(queries)) {\n  for (const kw of (queries[k] || [])) {\n    const c = String(kw).trim();\n    if (c) allKws.add(c);\n  }\n}\nfor (const fn of Object.values(preferredFilenames)) {\n  const c = String(fn).trim();\n  if (c) allKws.add(c);\n}\nif (allKws.size === 0) return [{ json: { skip: true, queries, preferredFilenames, queryString: \"name contains '___nope___'\" } }];\nconst clauses = Array.from(allKws).map(kw => \"name contains '\" + kw.replace(/'/g, \"\\\\'\") + \"'\");\nconst queryString = '(' + clauses.join(' or ') + \") and mimeType != 'application/vnd.google-apps.folder' and trashed = false\";\nreturn [{ json: { skip: false, queries, preferredFilenames, queryString } }];"
+      },
+      "id": "d1772f02-7e8d-4982-bfe1-7708fa48928b",
+      "name": "Build Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.queryString }}"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name,mimeType,webViewLink,parents)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            },
+            {
+              "name": "corpora",
+              "value": "user"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "4e127ef4-da2d-454e-abd6-15590abfb4ca",
+      "name": "Drive Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const httpRes = $input.first().json;\nconst bq = $('Build Query').first().json;\nconst queries = bq.queries || {};\nconst preferredFilenames = bq.preferredFilenames || {};\nconst files = httpRes.files || [];\nconst matches = {};\nfor (const docKey of Object.keys(queries)) {\n  const kws = (queries[docKey] || []).map(s => String(s).toLowerCase()).filter(Boolean);\n  const pref = preferredFilenames[docKey];\n  if (pref) {\n    const exact = files.find(f => String(f.name || '').toLowerCase() === String(pref).toLowerCase());\n    if (exact) {\n      matches[docKey] = { id: exact.id, name: exact.name, mimeType: exact.mimeType, webViewLink: exact.webViewLink };\n      continue;\n    }\n  }\n  if (kws.length === 0) { matches[docKey] = null; continue; }\n  const found = files.find(f => {\n    const n = String(f.name || '').toLowerCase();\n    return kws.some(kw => n.includes(kw));\n  });\n  matches[docKey] = found ? { id: found.id, name: found.name, mimeType: found.mimeType, webViewLink: found.webViewLink } : null;\n}\nreturn [{ json: { success: true, matches, fileCount: files.length } }];"
+      },
+      "id": "4e2c36cc-c6fa-4c98-ba09-d71442d435cd",
+      "name": "Aggregate Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4a05bf5e-1d6e-4111-97ca-7cdd26296caa",
+      "name": "Send Matches",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Search Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Query": {
+      "main": [
+        [
+          {
+            "node": "Drive Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive Search": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Matches": {
+      "main": [
+        [
+          {
+            "node": "Send Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  }
+}

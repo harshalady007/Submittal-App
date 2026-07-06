@@ -1,0 +1,178 @@
+{
+  "name": "Submittal Library Browser",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "submittal-library",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "37e15325-62fe-4a64-b814-68fc3655b2ba",
+      "name": "Library Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "c13a2e7a-2393-4fc1-893c-410caa3ff92d"
+    },
+    {
+      "parameters": {
+        "jsCode": "const folderId = $input.first().json.query.folder || '1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs';\nconst isRoot = !$input.first().json.query.folder;\nreturn [{ json: { folderId, isRoot } }];"
+      },
+      "id": "46ea48c0-0cfe-4b4b-958e-6dc19e96f0e0",
+      "name": "Resolve Folder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ \"'\" + $json.folderId + \"' in parents and trashed=false\" }}"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name,mimeType,webViewLink,iconLink)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "30d591a0-8cc2-46ec-ab12-c0b91de7bc24",
+      "name": "List Drive Files",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $input.first().json.files || [];\nconst isRoot = $('Resolve Folder').first().json.isRoot;\nconst folders = all.filter(f => f.mimeType === 'application/vnd.google-apps.folder');\nconst files = all.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');\nreturn [{ json: { folders, files, isRoot } }];"
+      },
+      "id": "095adb40-87e2-484e-b114-60feff897b1f",
+      "name": "Split Folders and Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a6af877f-9f2d-4fd7-a3e0-356940975096",
+      "name": "Respond Library",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Library Webhook": {
+      "main": [
+        [
+          {
+            "node": "Resolve Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Folder": {
+      "main": [
+        [
+          {
+            "node": "List Drive Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Drive Files": {
+      "main": [
+        [
+          {
+            "node": "Split Folders and Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Folders and Files": {
+      "main": [
+        [
+          {
+            "node": "Respond Library",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  }
+}

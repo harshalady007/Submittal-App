@@ -1,0 +1,185 @@
+{
+  "name": "Submittal Image Upload",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "submittal-image-upload",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "b1df55e0-7a36-4d45-8b77-4fda0a42ad25",
+      "name": "Image Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "caf0ac6f-f834-4ca8-ad50-081b33b71d21"
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "image",
+        "name": "={{ \"product-image-\" + $now.toFormat(\"yyyyMMddHHmmss\") + \".jpg\" }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1dCvVda8iJf8v7Unxmbvwrxn7xmjt8mRs"
+        },
+        "options": {}
+      },
+      "id": "40126cd1-767b-4fc5-8bc6-70a8327a0ed7",
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://www.googleapis.com/drive/v3/files/\" + $json.id + \"/permissions\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { role: \"reader\", type: \"anyone\" } }}",
+        "options": {}
+      },
+      "id": "d0684387-9dbc-4087-8513-ec0e1c2a2eb9",
+      "name": "Grant Public Read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "qYXbAHzTmJa8iv6c",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const file = $('Upload to Drive').first().json;\nreturn [{ json: { success: true, fileId: file.id, name: file.name, mimeType: file.mimeType, publicUrl: 'https://drive.google.com/uc?id=' + file.id, viewUrl: 'https://drive.google.com/file/d/' + file.id + '/view' } }];"
+      },
+      "id": "c44eb364-287c-427e-bf36-203c93322674",
+      "name": "Build Upload Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e28e0dee-08cb-4b9d-8108-aef405993a49",
+      "name": "Respond Upload",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Image Upload Webhook": {
+      "main": [
+        [
+          {
+            "node": "Upload to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [
+          {
+            "node": "Grant Public Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Grant Public Read": {
+      "main": [
+        [
+          {
+            "node": "Build Upload Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Upload Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 1,
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "templateCredsSetupCompleted": true
+  }
+}
