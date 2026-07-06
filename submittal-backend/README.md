@@ -106,7 +106,26 @@ The merge index page uses maroon `#7C0000` Playfair Display headings and
 `app/assets/fonts/` (download from Google Fonts) to get the exact faces;
 without them it falls back to Times-Roman/Helvetica.
 
-## Deployment: AWS Lambda + Function URL (recommended)
+## Deployment option A: Vercel (fastest — same platform as the frontend)
+
+`api/index.py` + `vercel.json` are already set up, so the backend deploys as a
+single Vercel Python function:
+
+1. In Vercel, **Add New Project → import `harshalady007/Submittal-App`**, set
+   **Root Directory = `submittal-backend`** (Framework Preset: Other).
+2. Add the env vars from `.env.example` (`GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GEMINI_API_KEY`) in
+   Project Settings → Environment Variables.
+3. Deploy. Endpoints appear at `https://<backend-project>.vercel.app/submittal-library` etc.
+4. In the **frontend** Vercel project, set the six `VITE_N8N_*_URL` vars (see
+   below) to those URLs and redeploy — Vite bakes them in at build time, so a
+   redeploy is required.
+
+Note: `maxDuration` is set to 300s; on the Hobby plan make sure Fluid Compute
+is enabled (it's the default for new projects) so fill/merge requests aren't
+cut off at 10s.
+
+## Deployment option B: AWS Lambda + Function URL (near-zero idle cost)
 
 **Why Lambda over an always-on host:** this backend is bursty and idle most of
 the time — the same "only runs when called" pattern as the old n8n webhooks —
