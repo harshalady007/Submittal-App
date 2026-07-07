@@ -5,3 +5,5 @@ __pycache__/
 package/
 lambda.zip
 app/assets/fonts/*.ttf
+.vercel
+.env*
